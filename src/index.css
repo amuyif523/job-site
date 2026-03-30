@@ -1,0 +1,127 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-base: 240 33% 5%;
+    --bg-surface: 240 33% 8%;
+    --bg-glass: 0 0% 100% / 0.04;
+    --border-glass: 263 67% 66% / 0.18;
+    --jarvis-purple: 263 67% 66%;
+    --jarvis-blue: 217 91% 60%;
+    --jarvis-crimson: 347 77% 50%;
+    --jarvis-green: 160 84% 39%;
+    --jarvis-yellow: 38 92% 50%;
+    --jarvis-cyan: 189 94% 43%;
+    --text-primary: 249 100% 97%;
+    --text-muted: 220 9% 46%;
+
+    --background: var(--bg-base);
+    --foreground: var(--text-primary);
+    --card: var(--bg-surface);
+    --card-foreground: var(--text-primary);
+    --popover: var(--bg-surface);
+    --popover-foreground: var(--text-primary);
+    --primary: var(--jarvis-purple);
+    --primary-foreground: 0 0% 100%;
+    --secondary: var(--bg-glass);
+    --secondary-foreground: var(--text-primary);
+    --muted: 220 9% 46% / 0.15;
+    --muted-foreground: var(--text-muted);
+    --accent: var(--jarvis-purple);
+    --accent-foreground: 0 0% 100%;
+    --destructive: var(--jarvis-crimson);
+    --destructive-foreground: 0 0% 100%;
+    --border: 263 67% 66% / 0.12;
+    --input: 263 67% 66% / 0.15;
+    --ring: var(--jarvis-purple);
+    --radius: 8px;
+
+    --sidebar-expanded: 200px;
+    --sidebar-collapsed: 52px;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Space Grotesk', sans-serif;
+  }
+  ::selection {
+    background: hsl(263 67% 66% / 0.3);
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(263 67% 66% / 0.3);
+    border-radius: 3px;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: 'Space Grotesk', sans-serif;
+  }
+  .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .text-gradient-purple {
+    background: linear-gradient(135deg, hsl(263 67% 66%), hsl(217 91% 60%));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .glass-surface {
+    background: hsl(var(--bg-glass));
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid hsl(var(--border-glass));
+    border-radius: var(--radius);
+  }
+  .glow-purple {
+    box-shadow: 0 4px 32px rgba(0,0,0,0.5), 0 0 20px rgba(139,92,246,0.35);
+  }
+  .glow-blue {
+    box-shadow: 0 0 20px rgba(59,130,246,0.35);
+  }
+  .glow-crimson {
+    box-shadow: 0 0 20px rgba(225,29,72,0.35);
+  }
+  .glow-green {
+    box-shadow: 0 0 20px rgba(16,185,129,0.35);
+  }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(139,92,246,0.3); }
+  50% { box-shadow: 0 0 28px rgba(139,92,246,0.7); }
+}
+
+@keyframes orb-ping {
+  0% { box-shadow: 0 0 0 0 rgba(139,92,246,0.7); }
+  100% { box-shadow: 0 0 0 16px rgba(139,92,246,0); }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-line {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+@keyframes dot-pulse {
+  0%, 80%, 100% { transform: scale(0); opacity: 0.5; }
+  40% { transform: scale(1); opacity: 1; }
+}

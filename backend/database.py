@@ -54,17 +54,5 @@ def init_db():
         )
 
     conn.commit()
-
-    # ── DEV shortcut user (Ctrl+Shift+L) ─────────────────────────────────────
-    # DELETE THIS BLOCK before going to production
-    import bcrypt
-    dev_pw = bcrypt.hashpw(b"devpass123", bcrypt.gensalt()).decode()
-    conn.execute("""
-        INSERT OR IGNORE INTO users (name, email, hashed_pw, target_role, plan)
-        VALUES (?, ?, ?, ?, ?)
-    """, ("Dev User", "dev@jarvis.local", dev_pw, "Software Engineer", "pro"))
-    # ─────────────────────────────────────────────────────────────────────────
-
-    conn.commit()
     conn.close()
     print("✅  Database ready — jarvis.db")

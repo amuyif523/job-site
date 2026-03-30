@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { GlassCard } from "./GlassCard";
 import { ParticleBackground } from "./ParticleBackground";
 import { Eye, EyeOff, Zap, FileText, Globe, Trophy } from "lucide-react";
@@ -18,30 +18,6 @@ export function LandingPage({ onLogin }: LandingPageProps) {
   const [targetRole, setTargetRole] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-
-  // ── DEV shortcut: Ctrl+Shift+L — fast login ───────────────────────────────
-  // TODO: DELETE THIS BLOCK BEFORE PRODUCTION
-  useEffect(() => {
-    const handleDevLogin = async (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key === "L") {
-        e.preventDefault();
-        setLoading(true);
-        setError("");
-        try {
-          const data = await apiLogin("ge47jev@gmail.com", "iPhone12.");
-          setToken(data.access_token);
-          onLogin({ ...data.user, avatar: null });
-        } catch {
-          setError("Dev login failed — is the backend running?");
-        } finally {
-          setLoading(false);
-        }
-      }
-    };
-    window.addEventListener("keydown", handleDevLogin);
-    return () => window.removeEventListener("keydown", handleDevLogin);
-  }, [onLogin]);
-  // ─────────────────────────────────────────────────────────────────────────
 
   const handleSubmit = async () => {
     setError("");
@@ -79,11 +55,6 @@ export function LandingPage({ onLogin }: LandingPageProps) {
   return (
     <div className="relative min-h-screen flex items-center justify-center" style={{ background: "#07070F" }}>
       <ParticleBackground />
-
-      {/* DEV badge — remove in production */}
-      <div className="fixed top-3 right-3 z-50 font-mono text-[9px] text-yellow-400/60 border border-yellow-400/20 px-2 py-1 rounded">
-        DEV · Ctrl+Shift+L = fast login
-      </div>
 
       <div className="relative z-[1] flex w-full max-w-[1100px] mx-auto px-8 gap-12 items-center">
         {/* Left column */}

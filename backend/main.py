@@ -7,6 +7,7 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
+from config import load_environment
 from database import init_db
 from auth import router as auth_router
 from jobs import router as jobs_router, init_jobs_table
@@ -15,6 +16,8 @@ from routers.ai import router as ai_router
 from routers.chat import router as chat_router
 from dependencies import get_current_user
 from models import UserPublic
+
+load_environment()
 
 
 

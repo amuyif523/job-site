@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import List
 from uuid import uuid4
 
-from fastapi import APIRouter, Body, Depends, File, Header, HTTPException, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
@@ -121,7 +121,6 @@ def _fetch_jobs(user_id: int, job_ids: List[int]) -> List[sqlite3.Row]:
 @router.post("/score-all", response_model=ScoreResponse)
 async def score_all(
     body: ScoreRequest | None = Body(default=None),
-    x_api_key: str | None = Header(default=None, alias="x-api-key"),
     current_user: UserPublic = Depends(get_current_user),
 ) -> ScoreResponse:
     req = body or ScoreRequest()
@@ -137,7 +136,6 @@ async def score_all(
         llm_service.get_score_from_ai(
             cv_text=cv_text,
             job_description=row["description"] or "",
-            user_api_key=x_api_key,
         )
         for row in job_rows
     ]

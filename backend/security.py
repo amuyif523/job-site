@@ -7,6 +7,10 @@ import bcrypt
 import jwt
 from datetime import datetime, timedelta, timezone
 
+from config import load_environment
+
+load_environment()
+
 SECRET_KEY  = os.getenv("JWT_SECRET", "CHANGE_ME_IN_PRODUCTION_jarvis_secret_2026")
 ALGORITHM   = "HS256"
 EXPIRE_DAYS = 7

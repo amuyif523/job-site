@@ -22,8 +22,6 @@ function getHeaders(withJson = true): Record<string, string> {
   if (withJson) headers["Content-Type"] = "application/json";
   const token = getToken();
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  const apiKey = localStorage.getItem("jarvis_claude_key");
-  if (apiKey) headers["x-api-key"] = apiKey;
   return headers;
 }
 

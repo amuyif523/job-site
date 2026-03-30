@@ -3,16 +3,24 @@ scraper.py — JobTeaser scraper using Playwright
 """
 
 import asyncio
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, Query
 from playwright.async_api import async_playwright
 from datetime import datetime, timezone
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from database import engine
 from dependencies import get_current_user
 from models import Job, UserPublic
+from worker import celery_app
 
 router = APIRouter()
+
+
+class TaskAcceptedResponse(BaseModel):
+    task_id: str
+    status: str
+    message: str
 
 # ── Scraper core ──────────────────────────────────────────────────────────────
 
@@ -126,39 +134,32 @@ async def scrape_jobteaser(user_id: int, target_role: str = "", max_jobs: int = 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-scrape_status: dict = {}  # simple in-memory status tracker
+@celery_app.task(name="tasks.run_scraper")
+def run_scraper_task(user_id: int, target_role: str = "", max_jobs: int = 300) -> dict:
+    saved = asyncio.run(scrape_jobteaser(user_id=user_id, target_role=target_role, max_jobs=max_jobs))
+    return {"saved": saved, "user_id": user_id}
 
-@router.post("/api/scrape")
-async def trigger_scrape(
-    background_tasks: BackgroundTasks,
+@router.post("/api/scrape", response_model=TaskAcceptedResponse, status_code=202)
+def trigger_scrape(
     current_user: UserPublic = Depends(get_current_user),
 ):
-    """Trigger a scrape in the background for the current user."""
-    user_id = current_user.id
-
-    if scrape_status.get(user_id) == "running":
-        return {"status": "already_running", "message": "Scrape already in progress"}
-
-    scrape_status[user_id] = "running"
-
-    async def run():
-        try:
-            saved = await scrape_jobteaser(
-                user_id=user_id,
-                target_role=current_user.target_role,
-                max_jobs=300,
-            )
-            scrape_status[user_id] = f"done:{saved}"
-        except Exception as e:
-            scrape_status[user_id] = f"error:{e}"
-            print(f"Scrape error: {e}")
-
-    background_tasks.add_task(run)
-    return {"status": "started", "message": f"Scraping jobs for '{current_user.target_role}'..."}
+    task = run_scraper_task.delay(current_user.id, current_user.target_role, 300)
+    return TaskAcceptedResponse(
+        task_id=task.id,
+        status="queued",
+        message=f"Scraping jobs for '{current_user.target_role}'...",
+    )
 
 
 @router.get("/api/scrape/status")
-def scrape_status_check(current_user: UserPublic = Depends(get_current_user)):
-    """Check scrape status for current user."""
-    status = scrape_status.get(current_user.id, "idle")
-    return {"status": status}
+def scrape_status_check(
+    task_id: str = Query(..., description="Celery task identifier"),
+    current_user: UserPublic = Depends(get_current_user),
+):
+    result = celery_app.AsyncResult(task_id)
+    payload = {"task_id": task_id, "status": result.status}
+    if result.successful():
+        payload["result"] = result.result
+    if result.failed():
+        payload["error"] = str(result.result)
+    return payload

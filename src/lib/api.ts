@@ -34,6 +34,12 @@ export interface AuthResponse {
   user: UserData;
 }
 
+export interface TaskQueuedResponse {
+  task_id: string;
+  status: string;
+  message: string;
+}
+
 export async function apiLogin(email: string, password: string): Promise<AuthResponse> {
   const res = await fetch(`${API_BASE}/auth/login`, {
     method: "POST",
@@ -116,13 +122,13 @@ export async function updateJobNotes(id: number, notes: string): Promise<void> {
   if (!res.ok) throw new Error("Failed to update notes");
 }
 
-export async function runScraper(): Promise<{ job_count: number }> {
+export async function runScraper(): Promise<TaskQueuedResponse> {
   const res = await apiFetch("/api/scrape", { method: "POST" });
   if (!res.ok) throw new Error("Failed to run scraper");
   return res.json();
 }
 
-export async function scoreAll(): Promise<{ scored: number }> {
+export async function scoreAll(): Promise<TaskQueuedResponse> {
   const res = await apiFetch("/api/score-all", { method: "POST" });
   if (!res.ok) throw new Error("Failed to score jobs");
   return res.json();

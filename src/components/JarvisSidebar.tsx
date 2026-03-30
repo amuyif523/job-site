@@ -46,6 +46,7 @@ function timeUntilNextScrape(): string {
 export function Sidebar({ active, onNavigate, onOpenSettings }: SidebarProps) {
   const [collapsed, setCollapsed]   = useState(false);
   const [scraping, setScraping]     = useState(false);
+  const [scrapeTaskId, setScrapeTaskId] = useState<string | null>(null);
   const [cooldown, setCooldown]     = useState(!canScrape());
   const [timeLeft, setTimeLeft]     = useState(timeUntilNextScrape());
   const queryClient = useQueryClient();
@@ -62,29 +63,32 @@ export function Sidebar({ active, onNavigate, onOpenSettings }: SidebarProps) {
 
   // Poll scrape status while running
   useEffect(() => {
-    if (!scraping) return;
+    if (!scraping || !scrapeTaskId) return;
     const interval = setInterval(async () => {
       try {
-        const res = await fetch("http://localhost:8000/api/scrape/status", {
+        const res = await fetch(`http://localhost:8000/api/scrape/status?task_id=${encodeURIComponent(scrapeTaskId)}`, {
           credentials: "include",
         });
         const data = await res.json();
 
-        if (data.status.startsWith("done:")) {
-          const count = data.status.split(":")[1];
+        if (data.status === "SUCCESS") {
+          const count = data.result?.saved ?? 0;
           setScraping(false);
+          setScrapeTaskId(null);
           queryClient.invalidateQueries({ queryKey: ["jobs"] });
           toast({ title: `✅ Scrape complete — ${count} new jobs added` });
-        } else if (data.status.startsWith("error:")) {
+        } else if (data.status === "FAILURE") {
           setScraping(false);
+          setScrapeTaskId(null);
           toast({ title: "Scraper failed", variant: "destructive" });
         }
       } catch {
         setScraping(false);
+        setScrapeTaskId(null);
       }
     }, 3000);
     return () => clearInterval(interval);
-  }, [scraping, queryClient]);
+  }, [scraping, scrapeTaskId, queryClient]);
 
   const handleScrape = async () => {
     if (!canScrape() || scraping) return;
@@ -96,14 +100,12 @@ export function Sidebar({ active, onNavigate, onOpenSettings }: SidebarProps) {
       });
       const data = await res.json();
 
-      if (data.status === "started") {
+      if ((data.status === "queued" || data.status === "started") && data.task_id) {
         setScraping(true);
+        setScrapeTaskId(data.task_id);
         localStorage.setItem(SCRAPE_KEY, Date.now().toString());
         setCooldown(true);
-        toast({ title: "🔍 Scraping jobs...", description: "This may take a minute" });
-      } else if (data.status === "already_running") {
-        setScraping(true);
-        toast({ title: "Already scraping..." });
+        toast({ title: "🔍 Scraping jobs...", description: "Task queued in worker" });
       }
     } catch {
       toast({ title: "Failed to start scraper", variant: "destructive" });

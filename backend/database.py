@@ -7,7 +7,15 @@ from config import load_environment
 
 load_environment()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+def _get_database_url() -> str:
+    url = os.getenv("DATABASE_URL", "").strip()
+    if url.startswith("postgres://"):
+        # Accept legacy postgres URL format often used by hosting and compose configs.
+        url = url.replace("postgres://", "postgresql://", 1)
+    return url
+
+
+DATABASE_URL = _get_database_url()
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is not set; application cannot start")
 

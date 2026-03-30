@@ -134,7 +134,13 @@ async def scrape_jobteaser(user_id: int, target_role: str = "", max_jobs: int = 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-@celery_app.task(name="tasks.run_scraper")
+@celery_app.task(
+    name="tasks.run_scraper",
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=600,
+    max_retries=5,
+)
 def run_scraper_task(user_id: int, target_role: str = "", max_jobs: int = 300) -> dict:
     saved = asyncio.run(scrape_jobteaser(user_id=user_id, target_role=target_role, max_jobs=max_jobs))
     return {"saved": saved, "user_id": user_id}

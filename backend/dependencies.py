@@ -2,23 +2,20 @@
 dependencies.py — reusable FastAPI dependencies
 """
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Depends, HTTPException, Request, status
 from sqlmodel import Session
 
 from database import get_session
 from models import User, UserPublic
-from security import decode_token
-
-bearer = HTTPBearer()
+from security import decode_token, get_token_from_cookie
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer),
+    request: Request,
     session: Session = Depends(get_session),
 ) -> UserPublic:
-    token = credentials.credentials
     try:
+        token = get_token_from_cookie(request)
         payload = decode_token(token)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { uploadCV, getToken } from "@/lib/api";
+import { uploadCV } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { Upload, Check, Loader2, X } from "lucide-react";
 
@@ -95,10 +95,7 @@ export function CVStatusBar() {
   const { data: cvData } = useQuery<CVLatestResponse>({
     queryKey: ["latestCV"],
     queryFn: async () => {
-      const headers: Record<string, string> = {};
-      const token = getToken();
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      const res = await fetch("http://localhost:8000/api/cv/latest", { headers });
+      const res = await fetch("http://localhost:8000/api/cv/latest", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch CV data");
       return res.json();
     },

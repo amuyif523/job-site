@@ -3,7 +3,6 @@ import { LayoutDashboard, Briefcase, CheckSquare, Settings, ChevronLeft, Play, L
 import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
-import { getToken } from "@/lib/api";
 
 export type Section = "dashboard" | "jobs" | "applications" | "profile" | "templates" | "leaderboard";
 
@@ -67,7 +66,7 @@ export function Sidebar({ active, onNavigate, onOpenSettings }: SidebarProps) {
     const interval = setInterval(async () => {
       try {
         const res = await fetch("http://localhost:8000/api/scrape/status", {
-          headers: { Authorization: `Bearer ${getToken()}` },
+          credentials: "include",
         });
         const data = await res.json();
 
@@ -93,7 +92,7 @@ export function Sidebar({ active, onNavigate, onOpenSettings }: SidebarProps) {
     try {
       const res = await fetch("http://localhost:8000/api/scrape", {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken()}` },
+        credentials: "include",
       });
       const data = await res.json();
 

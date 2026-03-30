@@ -1,7 +1,7 @@
 import os
 from collections.abc import Generator
 
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, create_engine
 
 from config import load_environment
 
@@ -20,5 +20,5 @@ def get_session() -> Generator[Session, None, None]:
 
 
 def init_db():
-    SQLModel.metadata.create_all(engine)
-    print("Database schema ensured")
+    # Schema lifecycle is managed by Alembic migrations.
+    return None

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { apiGetMe, clearToken, getToken, UserData } from "@/lib/api";
+import { apiGetMe, apiLogout, UserData } from "@/lib/api";
 
 type AuthContextValue = {
   isAuthenticated: boolean;
@@ -20,16 +20,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     const hydrateAuth = async () => {
-      const token = getToken();
-      if (!token) {
-        if (!cancelled) {
-          setIsAuthenticated(false);
-          setUser(null);
-          setIsAuthLoading(false);
-        }
-        return;
-      }
-
       try {
         const me = await apiGetMe();
         if (!cancelled) {
@@ -37,7 +27,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setIsAuthenticated(true);
         }
       } catch {
-        clearToken();
         if (!cancelled) {
           setUser(null);
           setIsAuthenticated(false);
@@ -66,7 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsAuthLoading(false);
       },
       logout: () => {
-        clearToken();
+        void apiLogout();
         setUser(null);
         setIsAuthenticated(false);
         setIsAuthLoading(false);

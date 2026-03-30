@@ -33,14 +33,12 @@ export function JarvisChat() {
     setMessages(updatedMessages);
 
     try {
-      const token = localStorage.getItem("jarvis_token");
-
       const response = await fetch("http://localhost:8000/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
         },
+        credentials: "include",
         body: JSON.stringify({
           messages: updatedMessages.map(m => ({
             role: m.from === "user" ? "user" : "model",

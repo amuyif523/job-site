@@ -6,6 +6,7 @@ import os
 import bcrypt
 import jwt
 from datetime import datetime, timedelta, timezone
+from fastapi import Request
 
 from config import load_environment
 
@@ -44,3 +45,10 @@ def decode_token(token: str) -> dict:
         raise ValueError("Token expired")
     except jwt.InvalidTokenError:
         raise ValueError("Invalid token")
+
+
+def get_token_from_cookie(request: Request) -> str:
+    token = (request.cookies.get("access_token") or "").strip()
+    if not token:
+        raise ValueError("Missing authentication cookie")
+    return token

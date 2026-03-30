@@ -9,7 +9,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from config import load_environment
-from database import init_db
 from auth import router as auth_router
 from jobs import router as jobs_router
 from scraper import router as scraper_router
@@ -24,7 +23,6 @@ load_environment()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
     yield
 
 app = FastAPI(title="JARVIS API", version="1.0.0", lifespan=lifespan)

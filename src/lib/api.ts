@@ -2,26 +2,9 @@ import { Job, JobStatus } from "@/types/job.ts";
 
 const API_BASE = "http://localhost:8000";
 
-// ── Token helpers ─────────────────────────────────────────────────────────────
-export function getToken(): string | null {
-  return localStorage.getItem("jarvis_token") || localStorage.getItem("access_token");
-}
-
-export function setToken(token: string): void {
-  localStorage.setItem("jarvis_token", token);
-  localStorage.setItem("access_token", token);
-}
-
-export function clearToken(): void {
-  localStorage.removeItem("jarvis_token");
-  localStorage.removeItem("access_token");
-}
-
 function getHeaders(withJson = true): Record<string, string> {
   const headers: Record<string, string> = {};
   if (withJson) headers["Content-Type"] = "application/json";
-  const token = getToken();
-  if (token) headers["Authorization"] = `Bearer ${token}`;
   return headers;
 }
 
@@ -33,6 +16,7 @@ async function apiFetch(path: string, init?: RequestInit, isFormData = false): P
   return fetch(`${API_BASE}${path}`, {
     ...init,
     headers,
+    credentials: "include",
   });
 }
 
@@ -47,8 +31,6 @@ export interface UserData {
 }
 
 export interface AuthResponse {
-  access_token: string;
-  token_type: string;
   user: UserData;
 }
 
@@ -56,6 +38,7 @@ export async function apiLogin(email: string, password: string): Promise<AuthRes
   const res = await fetch(`${API_BASE}/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({ email, password }),
   });
   if (!res.ok) {
@@ -75,6 +58,7 @@ export async function apiRegister(
   const res = await fetch(`${API_BASE}/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     body: JSON.stringify({
       name,
       email,
@@ -88,6 +72,13 @@ export async function apiRegister(
     throw new Error(err.detail || "Registration failed");
   }
   return res.json();
+}
+
+export async function apiLogout(): Promise<void> {
+  await fetch(`${API_BASE}/auth/logout`, {
+    method: "POST",
+    credentials: "include",
+  });
 }
 
 export async function apiGetMe(): Promise<UserData> {

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { GlassCard } from "./GlassCard";
 import { ParticleBackground } from "./ParticleBackground";
 import { Eye, EyeOff, Zap, FileText, Globe, Trophy } from "lucide-react";
-import { apiLogin, apiRegister, setToken, UserData } from "@/lib/api.ts";
+import { apiLogin, apiRegister, UserData } from "@/lib/api.ts";
 
 interface LandingPageProps {
   onLogin: (user: UserData) => void;
@@ -30,7 +30,6 @@ export function LandingPage({ onLogin }: LandingPageProps) {
         if (!name.trim()) { setError("Name is required"); setLoading(false); return; }
         data = await apiRegister(name, email, password, confirmPassword, targetRole);
       }
-      setToken(data.access_token);
       onLogin({ ...data.user, avatar: null });
     } catch (err: any) {
       setError(err.message || "Something went wrong");

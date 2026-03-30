@@ -2,14 +2,36 @@
 auth.py — /auth/register and /auth/login routes
 """
 
-from fastapi import APIRouter, HTTPException, status, Depends
+import os
+
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlmodel import Session, select
 
 from database import get_session
-from models import LoginRequest, RegisterRequest, TokenResponse, User, UserPublic
+from models import AuthResponse, LoginRequest, RegisterRequest, User, UserPublic
 from security import hash_password, verify_password, create_token
 
 router = APIRouter()
+
+COOKIE_NAME = "access_token"
+COOKIE_MAX_AGE = 60 * 60 * 24 * 7
+
+
+def _cookie_secure() -> bool:
+    # Set COOKIE_SECURE=true in production to enforce HTTPS-only cookies.
+    return os.getenv("COOKIE_SECURE", "false").strip().lower() == "true"
+
+
+def _set_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+        max_age=COOKIE_MAX_AGE,
+        path="/",
+    )
 
 
 def _to_user_public(user: User) -> UserPublic:
@@ -22,8 +44,12 @@ def _to_user_public(user: User) -> UserPublic:
     )
 
 
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-def register(body: RegisterRequest, session: Session = Depends(get_session)):
+@router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+def register(
+    body: RegisterRequest,
+    response: Response,
+    session: Session = Depends(get_session),
+):
     if body.password != body.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
@@ -48,11 +74,16 @@ def register(body: RegisterRequest, session: Session = Depends(get_session)):
 
     public_user = _to_user_public(user)
     token = create_token(public_user.id, public_user.email)
-    return TokenResponse(access_token=token, user=public_user)
+    _set_auth_cookie(response, token)
+    return AuthResponse(user=public_user)
 
 
-@router.post("/login", response_model=TokenResponse)
-def login(body: LoginRequest, session: Session = Depends(get_session)):
+@router.post("/login", response_model=AuthResponse)
+def login(
+    body: LoginRequest,
+    response: Response,
+    session: Session = Depends(get_session),
+):
     email = str(body.email).lower().strip()
     user = session.exec(select(User).where(User.email == email)).first()
 
@@ -61,4 +92,11 @@ def login(body: LoginRequest, session: Session = Depends(get_session)):
 
     public_user = _to_user_public(user)
     token = create_token(public_user.id, public_user.email)
-    return TokenResponse(access_token=token, user=public_user)
+    _set_auth_cookie(response, token)
+    return AuthResponse(user=public_user)
+
+
+@router.post("/logout")
+def logout(response: Response):
+    response.delete_cookie(key=COOKIE_NAME, path="/")
+    return {"ok": True}

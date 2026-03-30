@@ -11,7 +11,11 @@ from config import load_environment
 
 load_environment()
 
-SECRET_KEY  = os.getenv("JWT_SECRET", "CHANGE_ME_IN_PRODUCTION_jarvis_secret_2026")
+SECRET_KEY = os.getenv("JWT_SECRET")
+if not SECRET_KEY or not SECRET_KEY.strip():
+    raise RuntimeError("JWT_SECRET environment variable is not set; application cannot start")
+
+SECRET_KEY = SECRET_KEY.strip()
 ALGORITHM   = "HS256"
 EXPIRE_DAYS = 7
 

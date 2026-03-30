@@ -2,81 +2,63 @@
 auth.py — /auth/register and /auth/login routes
 """
 
-import sqlite3
 from fastapi import APIRouter, HTTPException, status, Depends
+from sqlmodel import Session, select
 
-from database import get_db, DB_PATH
-from models import RegisterRequest, LoginRequest, TokenResponse, UserPublic
+from database import get_session
+from models import LoginRequest, RegisterRequest, TokenResponse, User, UserPublic
 from security import hash_password, verify_password, create_token
-from dependencies import get_current_user
 
 router = APIRouter()
 
 
-def _row_to_user(row) -> UserPublic:
+def _to_user_public(user: User) -> UserPublic:
     return UserPublic(
-        id=row["id"],
-        name=row["name"],
-        email=row["email"],
-        target_role=row["target_role"],
-        plan=row["plan"],
+        id=int(user.id),
+        name=user.name,
+        email=user.email,
+        target_role=user.target_role,
+        plan=user.plan,
     )
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-def register(body: RegisterRequest):
+def register(body: RegisterRequest, session: Session = Depends(get_session)):
     if body.password != body.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-
-    existing = conn.execute("SELECT id FROM users WHERE email = ?", (body.email,)).fetchone()
+    email = str(body.email).lower().strip()
+    existing = session.exec(select(User).where(User.email == email)).first()
     if existing:
-        conn.close()
         raise HTTPException(status_code=409, detail="Email already registered")
 
-    hashed = hash_password(body.password)
-    cursor = conn.execute(
-        "INSERT INTO users (name, email, hashed_pw, target_role, plan) VALUES (?, ?, ?, ?, ?)",
-        (body.name.strip(), body.email.lower(), hashed, body.target_role or "", "free"),
+    user = User(
+        name=body.name.strip(),
+        email=email,
+        hashed_pw=hash_password(body.password),
+        target_role=body.target_role or "",
+        plan="free",
     )
-    conn.commit()
-    user_id = cursor.lastrowid
+    session.add(user)
+    session.commit()
+    session.refresh(user)
 
-    row = conn.execute(
-        "SELECT id, name, email, target_role, plan FROM users WHERE id = ?", (user_id,)
-    ).fetchone()
-    conn.close()
-
-    user = _row_to_user(row)
-    token = create_token(user.id, user.email)
-    return TokenResponse(access_token=token, user=user)
+    public_user = _to_user_public(user)
+    token = create_token(public_user.id, public_user.email)
+    return TokenResponse(access_token=token, user=public_user)
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(body: LoginRequest):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+def login(body: LoginRequest, session: Session = Depends(get_session)):
+    email = str(body.email).lower().strip()
+    user = session.exec(select(User).where(User.email == email)).first()
 
-    row = conn.execute(
-        "SELECT id, name, email, hashed_pw, target_role, plan FROM users WHERE email = ?",
-        (body.email.lower(),),
-    ).fetchone()
-    conn.close()
-
-    if not row or not verify_password(body.password, row["hashed_pw"]):
+    if not user or not verify_password(body.password, user.hashed_pw):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    user = UserPublic(
-        id=row["id"],
-        name=row["name"],
-        email=row["email"],
-        target_role=row["target_role"],
-        plan=row["plan"],
-    )
-    token = create_token(user.id, user.email)
-    return TokenResponse(access_token=token, user=user)
+    public_user = _to_user_public(user)
+    token = create_token(public_user.id, public_user.email)
+    return TokenResponse(access_token=token, user=public_user)

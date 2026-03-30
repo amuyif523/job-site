@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import io
-import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 from uuid import uuid4
@@ -12,10 +12,11 @@ from uuid import uuid4
 from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
+from sqlmodel import Session, select
 
 from auth import get_current_user
-from database import DB_PATH
-from models import UserPublic
+from database import get_session
+from models import CVData, Job, UserPublic
 from services import llm_service
 
 router = APIRouter()
@@ -73,69 +74,37 @@ def _extract_text_from_upload(data: bytes, filename: str) -> str:
     return data.decode("utf-8", errors="ignore")[:50000]
 
 
-def _fetch_cv_text(user_id: int) -> str:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    row = conn.execute(
-        """
-        SELECT extracted_text
-        FROM cv_data
-        WHERE user_id = ?
-        ORDER BY last_updated DESC
-        LIMIT 1
-        """,
-        (user_id,),
-    ).fetchone()
-    conn.close()
-    return row["extracted_text"] if row else ""
+def _fetch_cv_text(session: Session, user_id: int) -> str:
+    row = session.get(CVData, user_id)
+    return row.extracted_text if row else ""
 
 
-def _fetch_jobs(user_id: int, job_ids: List[int]) -> List[sqlite3.Row]:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-
+def _fetch_jobs(session: Session, user_id: int, job_ids: List[int]) -> List[Job]:
+    statement = select(Job).where(Job.user_id == user_id)
     if job_ids:
-        placeholders = ",".join("?" for _ in job_ids)
-        rows = conn.execute(
-            f"""
-            SELECT id, description
-            FROM jobs
-            WHERE user_id = ? AND id IN ({placeholders})
-            """,
-            (user_id, *job_ids),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            """
-            SELECT id, description
-            FROM jobs
-            WHERE user_id = ?
-            """,
-            (user_id,),
-        ).fetchall()
-
-    conn.close()
-    return rows
+        statement = statement.where(Job.id.in_(job_ids))
+    return list(session.exec(statement).all())
 
 
 @router.post("/score-all", response_model=ScoreResponse)
 async def score_all(
     body: ScoreRequest | None = Body(default=None),
     current_user: UserPublic = Depends(get_current_user),
+    session: Session = Depends(get_session),
 ) -> ScoreResponse:
     req = body or ScoreRequest()
-    cv_text = _fetch_cv_text(current_user.id)
+    cv_text = _fetch_cv_text(session, current_user.id)
     if not cv_text.strip():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No CV extracted text found")
 
-    job_rows = _fetch_jobs(current_user.id, req.job_ids)
+    job_rows = _fetch_jobs(session, current_user.id, req.job_ids)
     if not job_rows:
         return ScoreResponse(scored=0, results=[], errors=["No matching jobs found to score"])
 
     tasks = [
         llm_service.get_score_from_ai(
             cv_text=cv_text,
-            job_description=row["description"] or "",
+            job_description=row.description or "",
         )
         for row in job_rows
     ]
@@ -151,21 +120,21 @@ async def score_all(
     errors: List[str] = []
     for row, item in zip(job_rows, ai_results):
         if isinstance(item, llm_service.AuthenticationError):
-            errors.append(f"job_id={int(row['id'])}: {item}")
+            errors.append(f"job_id={int(row.id)}: {item}")
             continue
         if isinstance(item, llm_service.RateLimitError):
-            errors.append(f"job_id={int(row['id'])}: {item}")
+            errors.append(f"job_id={int(row.id)}: {item}")
             continue
         if isinstance(item, llm_service.ProviderError):
-            errors.append(f"job_id={int(row['id'])}: {item}")
+            errors.append(f"job_id={int(row.id)}: {item}")
             continue
         if isinstance(item, Exception):
-            errors.append(f"job_id={int(row['id'])}: unexpected scoring error")
+            errors.append(f"job_id={int(row.id)}: unexpected scoring error")
             continue
 
         results.append(
             ScoreResult(
-                job_id=int(row["id"]),
+                job_id=int(row.id),
                 compatibility_score=int(item.get("compatibility_score", 0)),
                 match_status=str(item.get("match_status", "Poor")),
                 reasoning=str(item.get("reasoning", "No reasoning provided.")),
@@ -198,6 +167,7 @@ def generate_documents(
 async def upload_cv(
     file: UploadFile = File(...),
     current_user: UserPublic = Depends(get_current_user),
+    session: Session = Depends(get_session),
 ) -> CVUploadResponse:
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -210,16 +180,22 @@ async def upload_cv(
 
     extracted_text = _extract_text_from_upload(data, original_name)
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        """
-        INSERT OR REPLACE INTO cv_data (user_id, filename, extracted_text, last_updated)
-        VALUES (?, ?, ?, datetime('now'))
-        """,
-        (current_user.id, safe_name, extracted_text),
-    )
-    conn.commit()
-    conn.close()
+    current = session.get(CVData, current_user.id)
+    if current:
+        current.filename = safe_name
+        current.extracted_text = extracted_text
+        current.last_updated = datetime.now(timezone.utc)
+        session.add(current)
+    else:
+        session.add(
+            CVData(
+                user_id=current_user.id,
+                filename=safe_name,
+                extracted_text=extracted_text,
+                last_updated=datetime.now(timezone.utc),
+            )
+        )
+    session.commit()
 
     return CVUploadResponse(
         success=True,

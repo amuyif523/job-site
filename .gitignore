@@ -26,6 +26,10 @@ dist-ssr
 # Python/backend local artifacts
 __pycache__/
 *.py[cod]
+.venv/
+venv/
+env/
+ENV/
 backend/.venv/
 backend/.env
 backend/.env.*

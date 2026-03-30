@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from config import load_environment
 from database import init_db
 from auth import router as auth_router
-from jobs import router as jobs_router, init_jobs_table
+from jobs import router as jobs_router
 from scraper import router as scraper_router
 from routers.ai import router as ai_router
 from routers.chat import router as chat_router
@@ -25,7 +25,6 @@ load_environment()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    init_jobs_table()
     yield
 
 app = FastAPI(title="JARVIS API", version="1.0.0", lifespan=lifespan)

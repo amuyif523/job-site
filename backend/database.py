@@ -1,58 +1,24 @@
-"""
-database.py — SQLite setup using raw sqlite3 (no ORM needed for this scale)
-"""
-
-import sqlite3
 import os
+from collections.abc import Generator
 
-DB_PATH = os.getenv("DB_PATH", "jarvis.db")
+from sqlmodel import Session, SQLModel, create_engine
+
+from config import load_environment
+
+load_environment()
+
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is not set; application cannot start")
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-    finally:
-        conn.close()
+def get_session() -> Generator[Session, None, None]:
+    with Session(engine) as session:
+        yield session
 
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            name        TEXT    NOT NULL,
-            email       TEXT    NOT NULL UNIQUE,
-            hashed_pw   TEXT    NOT NULL,
-            target_role TEXT    NOT NULL DEFAULT '',
-            plan        TEXT    NOT NULL DEFAULT 'free',
-            created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
-        )
-    """)
-
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS cv_data (
-            user_id        INTEGER PRIMARY KEY,
-            filename       TEXT    NOT NULL DEFAULT '',
-            extracted_text TEXT    NOT NULL DEFAULT '',
-            last_updated   DATETIME NOT NULL DEFAULT (datetime('now')),
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    """)
-
-    existing_cols = {
-        row[1] for row in conn.execute("PRAGMA table_info(cv_data)").fetchall()
-    }
-    if "filename" not in existing_cols:
-        conn.execute("ALTER TABLE cv_data ADD COLUMN filename TEXT NOT NULL DEFAULT ''")
-    if "extracted_text" not in existing_cols:
-        conn.execute("ALTER TABLE cv_data ADD COLUMN extracted_text TEXT NOT NULL DEFAULT ''")
-    if "last_updated" not in existing_cols:
-        conn.execute(
-            "ALTER TABLE cv_data ADD COLUMN last_updated DATETIME NOT NULL DEFAULT (datetime('now'))"
-        )
-
-    conn.commit()
-    conn.close()
-    print("✅  Database ready — jarvis.db")
+    SQLModel.metadata.create_all(engine)
+    print("Database schema ensured")

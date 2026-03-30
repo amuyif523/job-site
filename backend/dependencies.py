@@ -2,19 +2,20 @@
 dependencies.py — reusable FastAPI dependencies
 """
 
-import sqlite3
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlmodel import Session
 
-from database import get_db, DB_PATH
+from database import get_session
+from models import User, UserPublic
 from security import decode_token
-from models import UserPublic
 
 bearer = HTTPBearer()
 
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer),
+    session: Session = Depends(get_session),
 ) -> UserPublic:
     token = credentials.credentials
     try:
@@ -24,14 +25,14 @@ def get_current_user(
 
     user_id = int(payload["sub"])
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    row = conn.execute(
-        "SELECT id, name, email, target_role, plan FROM users WHERE id = ?", (user_id,)
-    ).fetchone()
-    conn.close()
-
-    if not row:
+    user = session.get(User, user_id)
+    if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
-    return UserPublic(**dict(row))
+    return UserPublic(
+        id=int(user.id),
+        name=user.name,
+        email=user.email,
+        target_role=user.target_role,
+        plan=user.plan,
+    )

@@ -2,17 +2,15 @@
 scraper.py — JobTeaser scraper using Playwright
 """
 
-import json
 import asyncio
 from fastapi import APIRouter, Depends, BackgroundTasks
 from playwright.async_api import async_playwright
-import sqlite3
 from datetime import datetime, timezone
+from sqlmodel import Session, select
 
-from database import DB_PATH
+from database import engine
 from dependencies import get_current_user
-from jobs import init_jobs_table
-from models import UserPublic
+from models import Job, UserPublic
 
 router = APIRouter()
 
@@ -98,27 +96,30 @@ async def scrape_jobteaser(user_id: int, target_role: str = "", max_jobs: int = 
         await browser.close()
 
     # ── Save to DB ────────────────────────────────────────────────────────────
-    init_jobs_table()
-    conn = sqlite3.connect(DB_PATH)
     now  = datetime.now(timezone.utc).isoformat()
     saved = 0
 
-    for job in all_jobs[:max_jobs]:
-        # Skip if already exists for this user
-        exists = conn.execute(
-            "SELECT id FROM jobs WHERE user_id = ? AND url = ?",
-            (user_id, job["url"])
-        ).fetchone()
+    with Session(engine) as session:
+        for job in all_jobs[:max_jobs]:
+            exists = session.exec(
+                select(Job.id).where(Job.user_id == user_id, Job.url == job["url"])
+            ).first()
 
-        if not exists and job["title"]:
-            conn.execute("""
-                INSERT INTO jobs (user_id, title, company, location, url, status, date_scraped)
-                VALUES (?, ?, ?, ?, ?, 'new', ?)
-            """, (user_id, job["title"], job["company"], job["location"], job["url"], now))
-            saved += 1
+            if not exists and job["title"]:
+                session.add(
+                    Job(
+                        user_id=user_id,
+                        title=job["title"],
+                        company=job["company"],
+                        location=job["location"],
+                        url=job["url"],
+                        status="new",
+                        date_scraped=datetime.fromisoformat(now),
+                    )
+                )
+                saved += 1
 
-    conn.commit()
-    conn.close()
+        session.commit()
     print(f"  ✅ Saved {saved} new jobs for user {user_id}")
     return saved
 

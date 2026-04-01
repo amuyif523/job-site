@@ -14,6 +14,7 @@ from jobs import router as jobs_router
 from scraper import router as scraper_router
 from routers.ai import router as ai_router
 from routers.chat import router as chat_router
+from routers.cv import router as cv_router
 from dependencies import get_current_user
 from models import UserPublic
 
@@ -28,7 +29,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="JARVIS API", version="1.0.0", lifespan=lifespan)
 
 # In production, set FRONTEND_URL to your deployed frontend origin.
-allowed_origins = ["http://localhost:5173"]
+allowed_origins = [
+    "http://localhost:5173",
+    "http://localhost:8080",
+]
 frontend_url = os.getenv("FRONTEND_URL", "").strip()
 if frontend_url:
     allowed_origins.append(frontend_url)
@@ -45,6 +49,7 @@ app.include_router(auth_router,    prefix="/auth",     tags=["auth"])
 app.include_router(jobs_router,    prefix="/api/jobs", tags=["jobs"])
 app.include_router(scraper_router,                     tags=["scraper"])
 app.include_router(ai_router,      prefix="/api",      tags=["ai"])
+app.include_router(cv_router,      prefix="/api/cv",   tags=["cv"])
 
 
 @app.get("/auth/me", response_model=UserPublic)

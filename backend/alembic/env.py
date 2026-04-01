@@ -14,7 +14,7 @@ if str(BASE_DIR) not in sys.path:
 
 from config import load_environment
 from database import DATABASE_URL
-from models import CVData, Job, User  # noqa: F401
+from models import CVData, Job, PasswordResetToken, User  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

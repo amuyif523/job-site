@@ -6,6 +6,8 @@ import asyncio
 import json
 from typing import Any
 
+from google import genai
+
 from anthropic import APIError as AnthropicAPIError
 from anthropic import APIStatusError as AnthropicAPIStatusError
 from anthropic import AsyncAnthropic
@@ -14,6 +16,8 @@ from openai import APIError, APIStatusError, AsyncOpenAI
 from config import (
     get_anthropic_api_key,
     get_anthropic_model,
+    get_gemini_api_key,
+    get_gemini_model,
     get_openai_api_key,
     get_openai_model,
 )
@@ -29,6 +33,13 @@ class RateLimitError(Exception):
 
 class ProviderError(Exception):
     """Raised when the model provider fails for non-auth, non-rate reasons."""
+
+
+def _get_gemini_client() -> genai.Client:
+    api_key = get_gemini_api_key()
+    if not api_key:
+        raise AuthenticationError("Missing backend Gemini API key. Set GEMINI_API_KEY.")
+    return genai.Client(api_key=api_key)
 
 
 def _status_from_score(score: int) -> str:
@@ -57,10 +68,62 @@ def _normalize_status(value: Any, score: int) -> str:
 
 
 def _parse_json(content: str) -> dict[str, Any]:
+    content = content.strip()
+    if content.startswith("```"):
+        content = content.strip("`")
+        content = content.replace("json\n", "", 1).strip()
     try:
         return json.loads(content)
     except json.JSONDecodeError as exc:
         raise ProviderError("Model returned invalid JSON output") from exc
+
+
+def _normalize_resume_list(value: Any) -> list[Any]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[Any] = []
+    for item in value:
+        if isinstance(item, (str, int, float, bool)) or item is None:
+            normalized.append(item)
+        elif isinstance(item, dict):
+            normalized.append(item)
+        else:
+            normalized.append(str(item))
+    return normalized
+
+
+def _normalize_resume_result(data: dict[str, Any]) -> dict[str, Any]:
+    summary = str(data.get("summary", "")).strip()[:5000]
+    skills = _normalize_resume_list(data.get("skills"))
+    experience = _normalize_resume_list(data.get("experience"))
+    education = _normalize_resume_list(data.get("education"))
+    projects = _normalize_resume_list(data.get("projects"))
+
+    return {
+        "summary": summary,
+        "skills": skills,
+        "experience": experience,
+        "education": education,
+        "projects": projects,
+    }
+
+
+def _fallback_resume_parse(text: str) -> dict[str, Any]:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    summary = " ".join(lines[:3])[:500]
+    skill_lines = [line for line in lines if any(keyword in line.lower() for keyword in ("skill", "technolog", "tool", "stack"))]
+    skills: list[str] = []
+    for line in skill_lines:
+      parts = [part.strip("-•,; ") for part in line.split(",")]
+      skills.extend([part for part in parts if part])
+
+    return {
+        "summary": summary,
+        "skills": skills[:12],
+        "experience": [],
+        "education": [],
+        "projects": [],
+    }
 
 
 def _build_messages(cv_text: str, job_description: str) -> list[dict[str, str]]:
@@ -86,6 +149,39 @@ def _build_messages(cv_text: str, job_description: str) -> list[dict[str, str]]:
             ),
         },
     ]
+
+
+def parse_resume(text: str) -> dict[str, Any]:
+    """Parse raw resume text into a structured JSON object using Gemini."""
+    cleaned_text = text.strip()
+    if not cleaned_text:
+        raise ProviderError("Resume text is empty and cannot be parsed")
+
+    if not get_gemini_api_key():
+        return _fallback_resume_parse(cleaned_text)
+
+    try:
+        client = _get_gemini_client()
+        response = client.models.generate_content(
+            model=get_gemini_model(),
+            contents=(
+                "Extract the candidate resume into JSON only.\n"
+                "Return exactly these keys: summary, skills, experience, education, projects.\n"
+                "Guidelines:\n"
+                "- summary must be a concise paragraph.\n"
+                "- skills must be an array of strings.\n"
+                "- experience, education, and projects must be arrays of objects or strings describing each item.\n"
+                "- Use empty arrays if a section is missing.\n"
+                "- No markdown, no code fences, no commentary.\n\n"
+                f"Resume text:\n{cleaned_text[:30000]}"
+            ),
+        )
+
+        content = (response.text or "").strip()
+        data = _parse_json(content)
+        return _normalize_resume_result(data)
+    except Exception:
+        return _fallback_resume_parse(cleaned_text)
 
 
 async def get_score_from_ai(

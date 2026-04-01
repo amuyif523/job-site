@@ -194,11 +194,13 @@ async def upload_cv(
     destination.write_bytes(data)
 
     extracted_text = _extract_text_from_upload(data, original_name)
+    parsed_resume = llm_service.parse_resume(extracted_text)
+    structured_resume = json.dumps(parsed_resume, ensure_ascii=False)
 
     current = session.get(CVData, current_user.id)
     if current:
         current.filename = safe_name
-        current.extracted_text = extracted_text
+        current.extracted_text = structured_resume
         current.last_updated = datetime.now(timezone.utc)
         session.add(current)
     else:
@@ -206,7 +208,7 @@ async def upload_cv(
             CVData(
                 user_id=current_user.id,
                 filename=safe_name,
-                extracted_text=extracted_text,
+                extracted_text=structured_resume,
                 last_updated=datetime.now(timezone.utc),
             )
         )

@@ -38,3 +38,13 @@ def get_openai_model() -> str:
 def get_anthropic_model() -> str:
     load_environment()
     return os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-latest").strip() or "claude-3-5-haiku-latest"
+
+
+def get_gemini_api_key() -> str:
+    load_environment()
+    return os.getenv("GEMINI_API_KEY", "").strip()
+
+
+def get_gemini_model() -> str:
+    load_environment()
+    return os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip() or "gemini-2.0-flash"

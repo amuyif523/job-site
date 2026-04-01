@@ -1,6 +1,8 @@
 import os
+import time
 from collections.abc import Generator
 
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, create_engine
 
 from config import load_environment
@@ -20,6 +22,20 @@ if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is not set; application cannot start")
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+
+for attempt in range(1, 6):
+    try:
+        with engine.connect() as conn:
+            pass
+        print("Successfully connected to the database.")
+        break
+    except OperationalError as e:
+        if attempt < 5:
+            print(f"Database connection failed. Retrying in 5 seconds... ({attempt}/5)")
+            time.sleep(5)
+        else:
+            print("Failed to connect to the database after 5 attempts.")
+            raise e
 
 
 def get_session() -> Generator[Session, None, None]:

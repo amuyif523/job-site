@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from pypdf import PdfReader
 from sqlmodel import Session, select
 
-from auth import get_current_user
+from dependencies import get_current_user
 from database import engine, get_session
 from models import CVData, Job, UserPublic
 from services import llm_service

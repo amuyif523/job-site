@@ -28,3 +28,6 @@ alembic==1.13.3
 
 celery==5.4.0
 redis==5.0.8
+
+
+google-genai==0.3.0

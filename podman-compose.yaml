@@ -1,47 +1,71 @@
-version: '3.8'
+version: "3.9"
 
 services:
   db:
     image: postgres:latest
     container_name: jarvis-db
+    restart: unless-stopped
     environment:
+      POSTGRES_DB: jarvis
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: secure_pass_123
-      POSTGRES_DB: jarvis
+    volumes:
+      - jarvis_db_data:/var/lib/postgresql
     ports:
       - "5432:5432"
-    volumes:
-      - jarvis_db_data:/var/lib/postgresql/data
+    networks:
+      - jarvis-internal
 
   redis:
     image: redis:alpine
     container_name: jarvis-redis
+    restart: unless-stopped
     ports:
-      - "6380:6379" # Host 6380 -> Container 6379
+      - "6380:6379"
+    networks:
+      - jarvis-internal
 
   api:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: jarvis-api
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://admin:secure_pass_123@db:5432/jarvis
+      REDIS_URL: redis://redis:6379/0
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
     depends_on:
       - db
       - redis
-    environment:
-      - DATABASE_URL=postgresql://admin:secure_pass_123@db:5432/jarvis
-      - REDIS_URL=redis://redis:6379/0
     ports:
       - "8000:8000"
-    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    networks:
+      - jarvis-internal
 
   worker:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: jarvis-worker
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://admin:secure_pass_123@db:5432/jarvis
+      REDIS_URL: redis://redis:6379/0
+    command: celery -A worker.celery_app worker --loglevel=info
     depends_on:
       - db
       - redis
-    environment:
-      - DATABASE_URL=postgresql://admin:secure_pass_123@db:5432/jarvis
-      - REDIS_URL=redis://redis:6379/0
-    command: celery -A worker.celery_app worker --loglevel=info
+    networks:
+      - jarvis-internal
 
 volumes:
   jarvis_db_data:
+
+networks:
+  jarvis-internal:
+    driver: bridge

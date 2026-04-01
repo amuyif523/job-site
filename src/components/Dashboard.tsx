@@ -25,6 +25,7 @@ interface DashboardProps {
   jobs: Job[];
   onGenerateForJob: (job: Job) => void;
   cvData?: CVLatestResponse | null;
+  onUploadClick: () => void;
 }
 
 function AnimatedCounter({ value }: { value: number }) {
@@ -47,7 +48,17 @@ function AnimatedCounter({ value }: { value: number }) {
   return <span>{display}</span>;
 }
 
-function EmptyOnboardingState() {
+function hasParsedResumeContent(parsed?: CVParsedJson | null): boolean {
+  if (!parsed) return false;
+  const summaryPresent = Boolean(parsed.summary && parsed.summary.trim().length > 0);
+  const listCount = [parsed.education, parsed.experience, parsed.skills, parsed.languages, parsed.projects].reduce(
+    (total, section) => total + (Array.isArray(section) ? section.length : 0),
+    0
+  );
+  return summaryPresent || listCount > 0;
+}
+
+function EmptyOnboardingState({ onUploadClick }: { onUploadClick: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
@@ -77,7 +88,10 @@ function EmptyOnboardingState() {
           Upload your resume to unlock AI parsing, strength scoring, and tailored job recommendations.
         </p>
         <button
-          onClick={() => fileRef.current?.click()}
+          onClick={() => {
+            onUploadClick();
+            fileRef.current?.click();
+          }}
           className="inline-flex items-center gap-2 px-5 py-3 rounded-md font-display font-semibold text-[12px] uppercase text-foreground transition-all hover:scale-[1.02]"
           style={{ background: "linear-gradient(135deg, #8B5CF6, #3B82F6)", boxShadow: "0 0 20px rgba(139,92,246,0.35)" }}
         >
@@ -95,7 +109,7 @@ function EmptyOnboardingState() {
   );
 }
 
-export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
+export function Dashboard({ jobs, onGenerateForJob, cvData, onUploadClick }: DashboardProps) {
   const scored = jobs.filter(j => j.score !== null);
   const kpis = [
     { label: "TOTAL JOBS", value: jobs.length },
@@ -120,24 +134,28 @@ export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
     return map[s] || "#6B7280";
   };
 
+  if (!hasParsedResumeContent(cvData?.parsed_json ?? null)) {
+    return (
+      <div className="animate-fade-up space-y-6">
+        <EmptyOnboardingState onUploadClick={onUploadClick} />
+      </div>
+    );
+  }
+
   return (
     <div className="animate-fade-up space-y-6">
-      {!cvData || !cvData.parsed_json || Object.keys(cvData.parsed_json).length === 0 ? (
-        <EmptyOnboardingState />
-      ) : (
-        <div className="grid grid-cols-4 gap-4">
-          {kpis.map(k => (
-            <GlassCard key={k.label} className="p-5 relative overflow-hidden">
-              <div className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: "linear-gradient(to bottom, #8B5CF6, #E11D48)" }} />
-              <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">{k.label}</p>
-              <p className="font-display font-bold text-[40px] text-foreground mt-1 leading-none">
-                <AnimatedCounter value={k.value} />
-              </p>
-              <div className="mt-3 h-px w-full" style={{ background: "linear-gradient(to right, #8B5CF6, #3B82F6)", animation: "pulse-line 2.5s ease-in-out infinite" }} />
-            </GlassCard>
-          ))}
-        </div>
-      )}
+      <div className="grid grid-cols-4 gap-4">
+        {kpis.map(k => (
+          <GlassCard key={k.label} className="p-5 relative overflow-hidden">
+            <div className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: "linear-gradient(to bottom, #8B5CF6, #E11D48)" }} />
+            <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">{k.label}</p>
+            <p className="font-display font-bold text-[40px] text-foreground mt-1 leading-none">
+              <AnimatedCounter value={k.value} />
+            </p>
+            <div className="mt-3 h-px w-full" style={{ background: "linear-gradient(to right, #8B5CF6, #3B82F6)", animation: "pulse-line 2.5s ease-in-out infinite" }} />
+          </GlassCard>
+        ))}
+      </div>
 
       {/* Today's Top Matches */}
       {topMatches.length > 0 ? (

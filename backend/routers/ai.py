@@ -194,8 +194,7 @@ async def upload_cv(
     destination.write_bytes(data)
 
     extracted_text = _extract_text_from_upload(data, original_name)
-    parsed_resume = llm_service.parse_resume(extracted_text)
-    structured_resume = json.dumps(parsed_resume, ensure_ascii=False)
+    structured_resume = await llm_service.parse_resume(extracted_text)
 
     current = session.get(CVData, current_user.id)
     if current:

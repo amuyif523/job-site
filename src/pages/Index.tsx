@@ -47,7 +47,7 @@ export default function Index() {
     enabled: isAuthenticated,
   });
 
-  const { data: latestCV } = useQuery<CVLatestResponse>({
+  const { data: cvData } = useQuery<CVLatestResponse>({
     queryKey: ["latestCV"],
     queryFn: async () => {
       const res = await fetch("http://localhost:8000/api/cv/latest", { credentials: "include" });
@@ -73,6 +73,10 @@ export default function Index() {
   const handleLogout = () => {
     logout();
     setActiveSection("dashboard");
+  };
+
+  const handleDashboardUploadClick = () => {
+    setActiveSection("profile");
   };
 
   return (
@@ -112,7 +116,12 @@ export default function Index() {
         ) : (
           <>
             {activeSection === "dashboard" && (
-                <Dashboard jobs={jobs} cvData={latestCV ?? null} onGenerateForJob={j => setGenerateJob(j)} />
+              <Dashboard
+                jobs={jobs}
+                cvData={cvData ?? null}
+                onUploadClick={handleDashboardUploadClick}
+                onGenerateForJob={j => setGenerateJob(j)}
+              />
             )}
             {activeSection === "jobs" && (
               <JobFeed jobs={jobs} onGenerateForJob={j => setGenerateJob(j)} onScoreAll={() => scoreMutation.mutate()} isScoring={scoreMutation.isPending} />

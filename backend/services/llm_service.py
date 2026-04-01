@@ -98,6 +98,7 @@ def _normalize_resume_result(data: dict[str, Any]) -> dict[str, Any]:
     experience = _normalize_resume_list(data.get("experience"))
     education = _normalize_resume_list(data.get("education"))
     projects = _normalize_resume_list(data.get("projects"))
+    languages = _normalize_resume_list(data.get("languages"))
 
     return {
         "summary": summary,
@@ -105,6 +106,7 @@ def _normalize_resume_result(data: dict[str, Any]) -> dict[str, Any]:
         "experience": experience,
         "education": education,
         "projects": projects,
+        "languages": languages,
     }
 
 
@@ -114,8 +116,8 @@ def _fallback_resume_parse(text: str) -> dict[str, Any]:
     skill_lines = [line for line in lines if any(keyword in line.lower() for keyword in ("skill", "technolog", "tool", "stack"))]
     skills: list[str] = []
     for line in skill_lines:
-      parts = [part.strip("-•,; ") for part in line.split(",")]
-      skills.extend([part for part in parts if part])
+        parts = [part.strip("-•,; ") for part in line.split(",")]
+        skills.extend([part for part in parts if part])
 
     return {
         "summary": summary,
@@ -123,6 +125,20 @@ def _fallback_resume_parse(text: str) -> dict[str, Any]:
         "experience": [],
         "education": [],
         "projects": [],
+        "languages": [],
+    }
+
+
+def _build_resume_payload(data: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_resume_result(data)
+    suggestions = data.get("suggestions")
+    if not isinstance(suggestions, list):
+        suggestions = []
+
+    clean_suggestions = [str(item).strip() for item in suggestions if str(item).strip()]
+    return {
+        "parsed_json": normalized,
+        "suggestions": clean_suggestions,
     }
 
 
@@ -151,37 +167,109 @@ def _build_messages(cv_text: str, job_description: str) -> list[dict[str, str]]:
     ]
 
 
-def parse_resume(text: str) -> dict[str, Any]:
-    """Parse raw resume text into a structured JSON object using Gemini."""
+async def parse_resume(text: str) -> str:
+    """Parse raw resume text into a structured JSON string using an available LLM provider."""
     cleaned_text = text.strip()
     if not cleaned_text:
         raise ProviderError("Resume text is empty and cannot be parsed")
 
-    if not get_gemini_api_key():
-        return _fallback_resume_parse(cleaned_text)
-
     try:
-        client = _get_gemini_client()
-        response = client.models.generate_content(
-            model=get_gemini_model(),
-            contents=(
-                "Extract the candidate resume into JSON only.\n"
-                "Return exactly these keys: summary, skills, experience, education, projects.\n"
-                "Guidelines:\n"
-                "- summary must be a concise paragraph.\n"
-                "- skills must be an array of strings.\n"
-                "- experience, education, and projects must be arrays of objects or strings describing each item.\n"
-                "- Use empty arrays if a section is missing.\n"
-                "- No markdown, no code fences, no commentary.\n\n"
-                f"Resume text:\n{cleaned_text[:30000]}"
-            ),
-        )
-
-        content = (response.text or "").strip()
-        data = _parse_json(content)
-        return _normalize_resume_result(data)
+        if get_gemini_api_key():
+            data = await asyncio.to_thread(_parse_resume_with_gemini, cleaned_text)
+        elif get_openai_api_key():
+            data = await _parse_resume_with_openai(cleaned_text)
+        elif get_anthropic_api_key():
+            data = await _parse_resume_with_anthropic(cleaned_text)
+        else:
+            data = _fallback_resume_parse(cleaned_text)
     except Exception:
-        return _fallback_resume_parse(cleaned_text)
+        data = _fallback_resume_parse(cleaned_text)
+
+    return json.dumps(_build_resume_payload(data), ensure_ascii=False)
+
+
+def _parse_resume_with_gemini(cleaned_text: str) -> dict[str, Any]:
+    client = _get_gemini_client()
+    response = client.models.generate_content(
+        model=get_gemini_model(),
+        contents=(
+            "Extract the candidate resume into JSON only.\n"
+            "Return exactly these keys: summary, education, experience, skills, languages, projects, suggestions.\n"
+            "Rules:\n"
+            "- summary must be a concise paragraph.\n"
+            "- education, experience, skills, languages, and projects must be arrays.\n"
+            "- suggestions must be an array of short improvement tips.\n"
+            "- Use empty arrays if a section is missing.\n"
+            "- No markdown, no code fences, no commentary.\n\n"
+            f"Resume text:\n{cleaned_text[:30000]}"
+        ),
+    )
+    content = (response.text or "").strip()
+    data = _parse_json(content)
+    return data
+
+
+async def _parse_resume_with_openai(cleaned_text: str) -> dict[str, Any]:
+    client = AsyncOpenAI(api_key=get_openai_api_key())
+    response = await client.chat.completions.create(
+        model=get_openai_model(),
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You extract resumes into valid JSON only. Return no markdown, no commentary, and no extra keys."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Extract the candidate resume into JSON only.\n"
+                    "Return exactly these keys: summary, education, experience, skills, languages, projects, suggestions.\n"
+                    "Rules:\n"
+                    "- summary must be a concise paragraph.\n"
+                    "- education, experience, skills, languages, and projects must be arrays.\n"
+                    "- suggestions must be an array of short improvement tips.\n"
+                    "- Use empty arrays if a section is missing.\n\n"
+                    f"Resume text:\n{cleaned_text[:30000]}"
+                ),
+            },
+        ],
+        temperature=0,
+        response_format={"type": "json_object"},
+    )
+    content = (response.choices[0].message.content or "").strip()
+    return _parse_json(content)
+
+
+async def _parse_resume_with_anthropic(cleaned_text: str) -> dict[str, Any]:
+    client = AsyncAnthropic(api_key=get_anthropic_api_key())
+    response = await client.messages.create(
+        model=get_anthropic_model(),
+        max_tokens=1200,
+        temperature=0,
+        system=(
+            "You extract resumes into valid JSON only. Return no markdown, no commentary, and no extra keys."
+        ),
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "Extract the candidate resume into JSON only.\n"
+                    "Return exactly these keys: summary, education, experience, skills, languages, projects, suggestions.\n"
+                    "Rules:\n"
+                    "- summary must be a concise paragraph.\n"
+                    "- education, experience, skills, languages, and projects must be arrays.\n"
+                    "- suggestions must be an array of short improvement tips.\n"
+                    "- Use empty arrays if a section is missing.\n\n"
+                    f"Resume text:\n{cleaned_text[:30000]}"
+                ),
+            }
+        ],
+    )
+    content = "".join(
+        block.text for block in response.content if hasattr(block, "text") and isinstance(block.text, str)
+    ).strip()
+    return _parse_json(content)
 
 
 async def get_score_from_ai(

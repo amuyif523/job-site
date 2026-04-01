@@ -32,6 +32,7 @@ app = FastAPI(title="JARVIS API", version="1.0.0", lifespan=lifespan)
 allowed_origins = [
     "http://localhost:5173",
     "http://localhost:8080",
+    "http://localhost:8081",
 ]
 frontend_url = os.getenv("FRONTEND_URL", "").strip()
 if frontend_url:

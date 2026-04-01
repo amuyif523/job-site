@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { GlassCard } from "./GlassCard";
 import { ParticleBackground } from "./ParticleBackground";
 import { Eye, EyeOff, Zap, FileText, Globe, Trophy } from "lucide-react";
@@ -182,9 +183,14 @@ export function LandingPage({ onLogin }: LandingPageProps) {
               </div>
 
               {tab === "signin" && (
-                <p className="text-right font-mono text-[10px] text-muted-foreground hover:text-foreground cursor-pointer underline mt-1">
-                  Forgot password?
-                </p>
+                <div className="text-right mt-1">
+                  <Link
+                    to="/forgot-password"
+                    className="font-mono text-[10px] text-muted-foreground hover:text-foreground underline"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
               )}
             </div>
           </GlassCard>

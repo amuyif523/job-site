@@ -40,6 +40,10 @@ export interface TaskQueuedResponse {
   message: string;
 }
 
+export interface MessageResponse {
+  message: string;
+}
+
 export async function apiLogin(email: string, password: string): Promise<AuthResponse> {
   const res = await fetch(`${API_BASE}/auth/login`, {
     method: "POST",
@@ -145,4 +149,28 @@ export async function uploadCV(file: File): Promise<void> {
   formData.append("file", file);
   const res = await apiFetch("/api/cv", { method: "POST", body: formData }, true);
   if (!res.ok) throw new Error("Failed to upload CV");
+}
+
+export async function requestPasswordReset(email: string): Promise<MessageResponse> {
+  const res = await apiFetch("/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to request password reset");
+  }
+  return res.json();
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<MessageResponse> {
+  const res = await apiFetch("/auth/reset-password", {
+    method: "POST",
+    body: JSON.stringify({ token, new_password: newPassword }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to reset password");
+  }
+  return res.json();
 }

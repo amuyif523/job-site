@@ -31,6 +31,16 @@ class CVData(SQLModel, table=True):
     last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
+class PasswordResetToken(SQLModel, table=True):
+    __tablename__ = "password_reset_tokens"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    token: str = Field(sa_column=Column(String, unique=True, index=True, nullable=False))
+    expires_at: datetime
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class Job(SQLModel, table=True):
     __tablename__ = "jobs"
 
@@ -73,3 +83,16 @@ class UserPublic(SQLModel):
 
 class AuthResponse(SQLModel):
     user: UserPublic
+
+
+class ForgotPasswordRequest(SQLModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(SQLModel):
+    token: str
+    new_password: str
+
+
+class MessageResponse(SQLModel):
+    message: str

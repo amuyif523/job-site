@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { uploadCV } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
-import { Upload, Check, Loader2, X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 
 interface CVParsedJson {
   summary?: string;
@@ -14,8 +14,8 @@ interface CVParsedJson {
 }
 
 interface CVLatestResponse {
-  parsed_json: CVParsedJson;
-  suggestions: string[];
+  parsed_json?: CVParsedJson | null;
+  suggestions?: string[];
 }
 
 const SECTION_KEYS: { key: keyof CVParsedJson; label: string }[] = [
@@ -34,9 +34,40 @@ function sectionPresent(val: unknown): boolean {
   return true;
 }
 
-function deriveScore(parsed: CVParsedJson): number {
-  const filled = SECTION_KEYS.filter((s) => sectionPresent(parsed[s.key])).length;
-  return Math.round((filled / SECTION_KEYS.length) * 100);
+function scoreSummary(summary?: string): number {
+  const length = summary?.trim().length ?? 0;
+  if (length >= 200) return 25;
+  if (length >= 100) return 20;
+  if (length >= 50) return 15;
+  if (length >= 25) return 8;
+  return 0;
+}
+
+function scoreSkills(skills?: unknown[]): number {
+  const count = Array.isArray(skills) ? skills.length : 0;
+  if (count >= 12) return 30;
+  if (count >= 8) return 25;
+  if (count >= 6) return 20;
+  if (count >= 3) return 12;
+  if (count >= 1) return 6;
+  return 0;
+}
+
+function scoreListSection(items?: unknown[]): number {
+  const count = Array.isArray(items) ? items.length : 0;
+  if (count >= 3) return 15;
+  if (count >= 1) return 10;
+  return 0;
+}
+
+function calculateStrength(parsed?: CVParsedJson | null): number {
+  if (!parsed) return 0;
+  const summaryScore = scoreSummary(parsed.summary);
+  const skillsScore = scoreSkills(parsed.skills);
+  const experienceScore = scoreListSection(parsed.experience);
+  const educationScore = scoreListSection(parsed.education);
+  const projectsScore = scoreListSection(parsed.projects);
+  return Math.min(100, summaryScore + skillsScore + experienceScore + educationScore + projectsScore);
 }
 
 function MiniScoreRing({ score, size = 28, strokeWidth = 3 }: { score: number; size?: number; strokeWidth?: number }) {
@@ -92,15 +123,24 @@ export function CVStatusBar() {
     onError: () => toast({ title: "Failed to upload CV", variant: "destructive" }),
   });
 
-  const { data: cvData } = useQuery<CVLatestResponse>({
+  const { data: cvData, isLoading: isCVLoading } = useQuery<CVLatestResponse>({
     queryKey: ["latestCV"],
     queryFn: async () => {
       const res = await fetch("http://localhost:8000/api/cv/latest", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch CV data");
       return res.json();
     },
-    enabled: !!cvName,
+    enabled: true,
   });
+
+  useEffect(() => {
+    const parsedJson = cvData?.parsed_json;
+    if (!isCVLoading && (!parsedJson || Object.keys(parsedJson).length === 0)) {
+      localStorage.removeItem("jarvis_cv_name");
+      setCvName("");
+      setPanelOpen(false);
+    }
+  }, [cvData, isCVLoading]);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -123,10 +163,8 @@ export function CVStatusBar() {
     return () => document.removeEventListener("mousedown", handler);
   }, [panelOpen]);
 
-  const score = cvData ? deriveScore(cvData.parsed_json) : null;
-  const scoreColor = score !== null
-    ? score >= 80 ? "text-jarvis-green" : score >= 60 ? "text-jarvis-yellow" : "text-jarvis-crimson"
-    : "";
+  const score = calculateStrength(cvData?.parsed_json ?? null);
+  const scoreColor = score >= 80 ? "text-jarvis-green" : score >= 60 ? "text-jarvis-yellow" : "text-jarvis-crimson";
 
   return (
     <div className="relative" ref={panelRef}>
@@ -191,7 +229,7 @@ export function CVStatusBar() {
           </div>
 
           {/* Gemini suggestions */}
-          {cvData.suggestions && cvData.suggestions.length > 0 && (
+          {cvData?.suggestions && cvData.suggestions.length > 0 && (
             <div className="border-t border-jarvis-purple/20 pt-2 space-y-1.5">
               <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Suggestions</span>
               {cvData.suggestions.map((tip, i) => (

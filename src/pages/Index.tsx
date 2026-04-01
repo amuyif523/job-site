@@ -20,6 +20,20 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 
+interface CVParsedJson {
+  summary?: string;
+  education?: unknown[];
+  experience?: unknown[];
+  skills?: unknown[];
+  languages?: unknown[];
+  projects?: unknown[];
+}
+
+interface CVLatestResponse {
+  parsed_json?: CVParsedJson | null;
+  suggestions?: string[];
+}
+
 export default function Index() {
   const [activeSection, setActiveSection] = useState<Section>("dashboard");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -30,6 +44,16 @@ export default function Index() {
   const { data: jobs = [], isLoading } = useQuery({
     queryKey: ["jobs"],
     queryFn: fetchJobs,
+    enabled: isAuthenticated,
+  });
+
+  const { data: latestCV } = useQuery<CVLatestResponse>({
+    queryKey: ["latestCV"],
+    queryFn: async () => {
+      const res = await fetch("http://localhost:8000/api/cv/latest", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch CV data");
+      return res.json();
+    },
     enabled: isAuthenticated,
   });
 
@@ -88,7 +112,7 @@ export default function Index() {
         ) : (
           <>
             {activeSection === "dashboard" && (
-              <Dashboard jobs={jobs} onGenerateForJob={j => setGenerateJob(j)} />
+                <Dashboard jobs={jobs} cvData={latestCV ?? null} onGenerateForJob={j => setGenerateJob(j)} />
             )}
             {activeSection === "jobs" && (
               <JobFeed jobs={jobs} onGenerateForJob={j => setGenerateJob(j)} onScoreAll={() => scoreMutation.mutate()} isScoring={scoreMutation.isPending} />

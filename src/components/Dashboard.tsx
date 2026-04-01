@@ -1,13 +1,30 @@
-import { useEffect, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { Job } from "@/types/job";
 import { GlassCard } from "./GlassCard";
 import { ScoreRing } from "./ScoreRing";
+import { uploadCV } from "@/lib/api";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
-import { Play } from "lucide-react";
+import { Play, Upload } from "lucide-react";
+
+interface CVParsedJson {
+  summary?: string;
+  education?: unknown[];
+  experience?: unknown[];
+  skills?: unknown[];
+  languages?: unknown[];
+  projects?: unknown[];
+}
+
+interface CVLatestResponse {
+  parsed_json?: CVParsedJson | null;
+  suggestions?: string[];
+}
 
 interface DashboardProps {
   jobs: Job[];
   onGenerateForJob: (job: Job) => void;
+  cvData?: CVLatestResponse | null;
 }
 
 function AnimatedCounter({ value }: { value: number }) {
@@ -30,7 +47,55 @@ function AnimatedCounter({ value }: { value: number }) {
   return <span>{display}</span>;
 }
 
-export function Dashboard({ jobs, onGenerateForJob }: DashboardProps) {
+function EmptyOnboardingState() {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
+
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => uploadCV(file),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["latestCV"] });
+    },
+  });
+
+  const handleFile = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      uploadMutation.mutate(file);
+    }
+  };
+
+  return (
+    <GlassCard className="p-8 md:p-10 min-h-[220px] flex items-center justify-between gap-6 overflow-hidden relative" hover={false}>
+      <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-jarvis-purple via-jarvis-blue to-jarvis-green" />
+      <div className="max-w-2xl space-y-4">
+        <p className="font-mono text-[10px] uppercase tracking-[0.35em] text-jarvis-purple">Welcome to JARVIS</p>
+        <h2 className="font-display font-bold text-3xl md:text-5xl text-foreground leading-tight">
+          Welcome to JARVIS
+        </h2>
+        <p className="font-display text-sm md:text-base text-muted-foreground max-w-xl">
+          Upload your resume to unlock AI parsing, strength scoring, and tailored job recommendations.
+        </p>
+        <button
+          onClick={() => fileRef.current?.click()}
+          className="inline-flex items-center gap-2 px-5 py-3 rounded-md font-display font-semibold text-[12px] uppercase text-foreground transition-all hover:scale-[1.02]"
+          style={{ background: "linear-gradient(135deg, #8B5CF6, #3B82F6)", boxShadow: "0 0 20px rgba(139,92,246,0.35)" }}
+        >
+          <Upload className="h-4 w-4" />
+          Upload Your Resume to Begin
+        </button>
+        <input ref={fileRef} type="file" accept=".pdf" className="hidden" onChange={handleFile} />
+      </div>
+      <div className="hidden md:flex flex-col items-end text-right gap-2 text-muted-foreground font-mono text-[11px]">
+        <span>AI parsing</span>
+        <span>Resume strength</span>
+        <span>Job matching</span>
+      </div>
+    </GlassCard>
+  );
+}
+
+export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
   const scored = jobs.filter(j => j.score !== null);
   const kpis = [
     { label: "TOTAL JOBS", value: jobs.length },
@@ -57,19 +122,22 @@ export function Dashboard({ jobs, onGenerateForJob }: DashboardProps) {
 
   return (
     <div className="animate-fade-up space-y-6">
-      {/* KPI Row */}
-      <div className="grid grid-cols-4 gap-4">
-        {kpis.map(k => (
-          <GlassCard key={k.label} className="p-5 relative overflow-hidden">
-            <div className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: "linear-gradient(to bottom, #8B5CF6, #E11D48)" }} />
-            <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">{k.label}</p>
-            <p className="font-display font-bold text-[40px] text-foreground mt-1 leading-none">
-              <AnimatedCounter value={k.value} />
-            </p>
-            <div className="mt-3 h-px w-full" style={{ background: "linear-gradient(to right, #8B5CF6, #3B82F6)", animation: "pulse-line 2.5s ease-in-out infinite" }} />
-          </GlassCard>
-        ))}
-      </div>
+      {!cvData || !cvData.parsed_json || Object.keys(cvData.parsed_json).length === 0 ? (
+        <EmptyOnboardingState />
+      ) : (
+        <div className="grid grid-cols-4 gap-4">
+          {kpis.map(k => (
+            <GlassCard key={k.label} className="p-5 relative overflow-hidden">
+              <div className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: "linear-gradient(to bottom, #8B5CF6, #E11D48)" }} />
+              <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">{k.label}</p>
+              <p className="font-display font-bold text-[40px] text-foreground mt-1 leading-none">
+                <AnimatedCounter value={k.value} />
+              </p>
+              <div className="mt-3 h-px w-full" style={{ background: "linear-gradient(to right, #8B5CF6, #3B82F6)", animation: "pulse-line 2.5s ease-in-out infinite" }} />
+            </GlassCard>
+          ))}
+        </div>
+      )}
 
       {/* Today's Top Matches */}
       {topMatches.length > 0 ? (

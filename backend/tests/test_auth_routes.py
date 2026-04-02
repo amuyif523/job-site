@@ -84,8 +84,8 @@ class AuthRouteTests(unittest.TestCase):
             json={
                 "name": "New User",
                 "email": "fresh@example.com",
-                "password": "supersecret",
-                "confirm_password": "supersecret",
+                "password": "StrongPass123",
+                "confirm_password": "StrongPass123",
                 "target_role": "Designer",
             },
         )
@@ -98,8 +98,8 @@ class AuthRouteTests(unittest.TestCase):
                 json={
                     "name": "New User",
                     "email": "fresh@example.com",
-                    "password": "supersecret",
-                    "confirm_password": "supersecret",
+                    "password": "StrongPass123",
+                    "confirm_password": "StrongPass123",
                     "target_role": "Designer",
                 },
             )

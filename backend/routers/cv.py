@@ -18,6 +18,7 @@ router = APIRouter()
 
 class CVLatestResponse(BaseModel):
     has_cv: bool = Field(default=False)
+    status: str = Field(default="no_cv")
     parsed_json: dict[str, Any] = Field(default_factory=dict)
     suggestions: list[str] = Field(default_factory=list)
 
@@ -34,6 +35,19 @@ def _load_stored_payload(row: CVData) -> dict[str, Any]:
         return {}
 
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _has_parsed_resume_content(parsed_json: dict[str, Any]) -> bool:
+    summary = parsed_json.get("summary")
+    if isinstance(summary, str) and summary.strip():
+        return True
+
+    for key in ("education", "experience", "skills", "languages", "projects"):
+        value = parsed_json.get(key)
+        if isinstance(value, list) and len(value) > 0:
+            return True
+
+    return False
 
 
 @router.get("/latest", response_model=CVLatestResponse)
@@ -60,6 +74,7 @@ def get_latest_cv(
     if not parsed:
         payload = CVLatestResponse()
         payload.has_cv = True
+        payload.status = "invalid"
         return payload
 
     payload = CVLatestResponse()
@@ -80,5 +95,7 @@ def get_latest_cv(
     suggestions = parsed.get("suggestions")
     if isinstance(suggestions, list):
         payload.suggestions = [str(item) for item in suggestions]
+
+    payload.status = "ready" if _has_parsed_resume_content(payload.parsed_json) else "incomplete"
 
     return payload

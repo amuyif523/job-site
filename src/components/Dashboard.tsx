@@ -2,7 +2,7 @@ import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { Job } from "@/types/job";
 import { GlassCard } from "./GlassCard";
 import { ScoreRing } from "./ScoreRing";
-import { uploadCV, type CVLatestResponse, type CVParsedJson } from "@/lib/api";
+import { getCVUiState, uploadCV, type CVLatestResponse } from "@/lib/api";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { Loader2, Play, Upload } from "lucide-react";
@@ -35,7 +35,6 @@ function AnimatedCounter({ value }: { value: number }) {
 }
 
 
-
 function StepTwoCard() {
   return (
     <GlassCard className="p-8 md:p-10 min-h-[220px] flex items-center justify-between gap-6 overflow-hidden relative" hover={false}>
@@ -62,7 +61,17 @@ function StepTwoCard() {
   );
 }
 
-function EmptyOnboardingState() {
+function CVRecoveryState({
+  title,
+  description,
+  actionLabel,
+  recoveryHint,
+}: {
+  title: string;
+  description: string;
+  actionLabel: string;
+  recoveryHint: string;
+}) {
   const fileRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
@@ -70,6 +79,7 @@ function EmptyOnboardingState() {
     mutationFn: (file: File) => uploadCV(file),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["latestCV"] });
+      toast({ title: "CV uploaded successfully" });
     },
     onError: (error: Error) => {
       toast({
@@ -91,12 +101,15 @@ function EmptyOnboardingState() {
     <GlassCard className="p-8 md:p-10 min-h-[220px] flex items-center justify-between gap-6 overflow-hidden relative" hover={false}>
       <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-jarvis-purple via-jarvis-blue to-jarvis-green" />
       <div className="max-w-2xl space-y-4">
-        <p className="font-mono text-[10px] uppercase tracking-[0.35em] text-jarvis-purple">Welcome to JARVIS</p>
+        <p className="font-mono text-[10px] uppercase tracking-[0.35em] text-jarvis-purple">CV Status</p>
         <h2 className="font-display font-bold text-3xl md:text-5xl text-foreground leading-tight">
-          Welcome to JARVIS
+          {title}
         </h2>
         <p className="font-display text-sm md:text-base text-muted-foreground max-w-xl">
-          Upload your resume to unlock AI parsing, strength scoring, and tailored job recommendations.
+          {description}
+        </p>
+        <p className="font-mono text-[11px] text-muted-foreground max-w-xl">
+          {recoveryHint}
         </p>
         <button
           disabled={uploadMutation.isPending}
@@ -107,24 +120,22 @@ function EmptyOnboardingState() {
           style={{ background: "linear-gradient(135deg, #8B5CF6, #3B82F6)", boxShadow: "0 0 20px rgba(139,92,246,0.35)" }}
         >
           {uploadMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-          {uploadMutation.isPending ? "JARVIS is analyzing your CV..." : "Upload Your Resume to Begin"}
+          {uploadMutation.isPending ? "JARVIS is analyzing your CV..." : actionLabel}
         </button>
         <input ref={fileRef} type="file" accept=".pdf" className="hidden" onChange={handleFile} />
       </div>
       <div className="hidden md:flex flex-col items-end text-right gap-2 text-muted-foreground font-mono text-[11px]">
-        <span>AI parsing</span>
-        <span>Resume strength</span>
-        <span>Job matching</span>
+        <span>Upload</span>
+        <span>Review</span>
+        <span>Recover fast</span>
       </div>
     </GlassCard>
   );
 }
 
 export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
-  // Support legacy API response formats by dynamically assessing parsed_json if has_cv is undefined
-  const hasResumeData = cvData?.has_cv ?? (cvData?.parsed_json ? Object.keys(cvData.parsed_json).length > 0 : false) ?? false;
-
-  console.log("[Dashboard] Rendering with cvData present:", !!cvData, "hasResumeData:", hasResumeData);
+  const cvState = getCVUiState(cvData, false);
+  const hasResumeData = cvState === "ready";
   const scored = jobs.filter(j => j.score !== null);
   const kpis = [
     { label: "TOTAL JOBS", value: jobs.length },
@@ -149,10 +160,54 @@ export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
     return map[s] || "#6B7280";
   };
 
-  if (!hasResumeData) {
+  if (cvState === "no_cv") {
     return (
       <div className="animate-fade-up space-y-6">
-        <EmptyOnboardingState />
+        <CVRecoveryState
+          title="Upload Your Resume to Begin"
+          description="Upload your resume to unlock AI parsing, strength scoring, and tailored job recommendations."
+          actionLabel="Upload Your Resume to Begin"
+          recoveryHint="Use a PDF resume with selectable text so JARVIS can read it reliably."
+        />
+      </div>
+    );
+  }
+
+  if (cvState === "uploading") {
+    return (
+      <div className="animate-fade-up space-y-6">
+        <CVRecoveryState
+          title="Your CV is being processed"
+          description="JARVIS is parsing your uploaded resume right now. This should only take a moment."
+          actionLabel="Processing CV..."
+          recoveryHint="Keep this tab open. If this state persists, try uploading the PDF again."
+        />
+      </div>
+    );
+  }
+
+  if (cvState === "incomplete") {
+    return (
+      <div className="animate-fade-up space-y-6">
+        <CVRecoveryState
+          title="Your CV needs a cleaner upload"
+          description="The file uploaded, but JARVIS could not extract enough structured resume data to build your dashboard yet."
+          actionLabel="Upload a Better PDF"
+          recoveryHint="Try a PDF with selectable text, clear section headings, and less visual complexity."
+        />
+      </div>
+    );
+  }
+
+  if (cvState === "invalid") {
+    return (
+      <div className="animate-fade-up space-y-6">
+        <CVRecoveryState
+          title="We could not read your current CV"
+          description="Your last upload is stored, but the parsed resume data is invalid, so JARVIS cannot trust it."
+          actionLabel="Re-upload CV"
+          recoveryHint="Upload a fresh PDF resume to recover and unlock scoring and job matching again."
+        />
       </div>
     );
   }

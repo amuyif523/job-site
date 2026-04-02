@@ -207,6 +207,7 @@ export interface CVParsedJson {
 
 export interface CVLatestResponse {
   has_cv?: boolean;
+  status?: "no_cv" | "ready" | "incomplete" | "invalid";
   parsed_json?: CVParsedJson | null;
   suggestions?: string[];
 }
@@ -215,6 +216,32 @@ export async function fetchLatestCV(): Promise<CVLatestResponse> {
   const res = await apiFetch("/api/cv/latest");
   if (!res.ok) await throwApiError(res, "Failed to fetch CV data");
   return res.json();
+}
+
+export type CVUiState = "no_cv" | "uploading" | "ready" | "incomplete" | "invalid";
+
+export function hasParsedResumeContent(parsed?: CVParsedJson | null): boolean {
+  if (!parsed) return false;
+
+  if (typeof parsed.summary === "string" && parsed.summary.trim().length > 0) {
+    return true;
+  }
+
+  return [parsed.education, parsed.experience, parsed.skills, parsed.languages, parsed.projects].some(
+    (section) => Array.isArray(section) && section.length > 0
+  );
+}
+
+export function getCVUiState(cvData?: CVLatestResponse | null, isUploading = false): CVUiState {
+  if (isUploading) return "uploading";
+
+  if (!cvData?.has_cv) return "no_cv";
+
+  if (cvData.status === "invalid" || cvData.status === "incomplete" || cvData.status === "ready") {
+    return cvData.status;
+  }
+
+  return hasParsedResumeContent(cvData.parsed_json ?? null) ? "ready" : "incomplete";
 }
 
 export async function requestPasswordReset(email: string): Promise<MessageResponse> {

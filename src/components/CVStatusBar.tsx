@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchLatestCV, uploadCV, type CVLatestResponse } from "@/lib/api";
+import { fetchLatestCV, getCVUiState, uploadCV, type CVLatestResponse } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { Loader2, X } from "lucide-react";
 
@@ -100,13 +100,26 @@ export function CVStatusBar() {
   const panelRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
+  const persistCvName = (name: string) => {
+    const trimmed = name.trim();
+    setCvName(trimmed);
+    if (trimmed) {
+      localStorage.setItem("jarvis_cv_name", trimmed);
+    } else {
+      localStorage.removeItem("jarvis_cv_name");
+    }
+  };
+
   const uploadMutation = useMutation({
     mutationFn: (file: File) => uploadCV(file),
-    onSuccess: () => {
+    onMutate: () => ({ previousCvName: cvName }),
+    onSuccess: async (_data, file) => {
+      persistCvName(file.name);
       toast({ title: "CV uploaded successfully" });
-      queryClient.invalidateQueries({ queryKey: ["latestCV"] });
+      await queryClient.invalidateQueries({ queryKey: ["latestCV"] });
     },
-    onError: (error: Error) => {
+    onError: (error: Error, _file, context) => {
+      persistCvName(context?.previousCvName ?? "");
       toast({
         title: "CV upload failed",
         description: error.message || "Failed to upload CV",
@@ -125,8 +138,7 @@ export function CVStatusBar() {
 
   useEffect(() => {
     if (!isCVLoading && !cvData?.has_cv) {
-      localStorage.removeItem("jarvis_cv_name");
-      setCvName("");
+      persistCvName("");
       setPanelOpen(false);
     }
   }, [cvData, isCVLoading]);
@@ -134,9 +146,8 @@ export function CVStatusBar() {
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setCvName(file.name);
-      localStorage.setItem("jarvis_cv_name", file.name);
       uploadMutation.mutate(file);
+      e.target.value = "";
     }
   };
 
@@ -154,35 +165,71 @@ export function CVStatusBar() {
 
   const score = calculateStrength(cvData?.parsed_json ?? null);
   const scoreColor = score >= 80 ? "text-jarvis-green" : score >= 60 ? "text-jarvis-yellow" : "text-jarvis-crimson";
+  const cvState = getCVUiState(cvData, uploadMutation.isPending);
+  const hasStoredCv = cvState !== "no_cv";
+  const displayName = cvName || (hasStoredCv ? "Uploaded CV" : "");
+  const stateLabel = {
+    no_cv: "No CV",
+    uploading: "Uploading CV",
+    ready: "CV ready",
+    incomplete: "Needs review",
+    invalid: "Upload issue",
+  }[cvState];
+  const stateDotClass = {
+    no_cv: "bg-jarvis-crimson",
+    uploading: "bg-jarvis-blue animate-pulse",
+    ready: "bg-jarvis-green animate-pulse",
+    incomplete: "bg-jarvis-yellow animate-pulse",
+    invalid: "bg-jarvis-crimson animate-pulse",
+  }[cvState];
+  const actionLabel = {
+    no_cv: "Upload",
+    uploading: "Uploading...",
+    ready: "Replace",
+    incomplete: "Re-upload",
+    invalid: "Try again",
+  }[cvState];
+  const helperText = {
+    uploading: "We are parsing your CV now.",
+    incomplete: "Your CV uploaded, but JARVIS could not build a strong profile yet.",
+    invalid: "The uploaded CV could not be parsed correctly.",
+  }[cvState];
+  const recoveryText = {
+    incomplete: "Try a cleaner PDF with selectable text and clearer section headings.",
+    invalid: "Upload a fresh PDF resume to recover.",
+  }[cvState];
 
   return (
     <div className="relative" ref={panelRef}>
       <div className="glass-surface px-3 py-2 flex items-center gap-2 font-mono text-[11px]">
-        {cvName ? (
+        {cvState !== "no_cv" ? (
           <>
-            <div className="h-2 w-2 rounded-full bg-jarvis-green animate-pulse" />
-            <span className="text-muted-foreground max-w-[120px] truncate">{cvName}</span>
-            {score !== null && (
+            <div className={`h-2 w-2 rounded-full ${stateDotClass}`} />
+            <span className="text-muted-foreground max-w-[120px] truncate">{displayName}</span>
+            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{stateLabel}</span>
+            {cvState === "ready" && score !== null && (
               <button onClick={() => setPanelOpen((v) => !v)} className="transition-transform hover:scale-110">
                 <MiniScoreRing score={score} />
               </button>
             )}
             <button
               onClick={() => fileRef.current?.click()}
-              className="text-muted-foreground hover:text-foreground transition-colors underline"
+              disabled={uploadMutation.isPending}
+              className="text-muted-foreground hover:text-foreground transition-colors underline disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Replace
+              {actionLabel}
             </button>
           </>
         ) : (
           <>
-            <div className="h-2 w-2 rounded-full bg-jarvis-crimson" />
-            <span className="text-muted-foreground">No CV</span>
+            <div className={`h-2 w-2 rounded-full ${stateDotClass}`} />
+            <span className="text-muted-foreground">{stateLabel}</span>
             <button
               onClick={() => fileRef.current?.click()}
+              disabled={uploadMutation.isPending}
               className="border border-jarvis-crimson/40 text-jarvis-crimson px-2 py-0.5 rounded hover:bg-jarvis-crimson hover:text-foreground transition-all"
             >
-              {uploadMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Upload"}
+              {uploadMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : actionLabel}
             </button>
           </>
         )}
@@ -190,7 +237,7 @@ export function CVStatusBar() {
       </div>
 
       {/* Strength breakdown panel */}
-      {panelOpen && cvData && score !== null && (
+      {panelOpen && cvData && cvState === "ready" && score !== null && (
         <div
           className="absolute top-full right-0 mt-2 w-[260px] glass-surface rounded-xl p-3 font-mono text-[11px]"
           style={{ zIndex: 60 }}
@@ -228,6 +275,13 @@ export function CVStatusBar() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {cvState !== "ready" && cvState !== "no_cv" && (
+        <div className="mt-2 max-w-[260px] text-[10px] font-mono text-muted-foreground">
+          {helperText}
+          {recoveryText ? ` ${recoveryText}` : ""}
         </div>
       )}
     </div>

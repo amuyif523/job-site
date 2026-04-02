@@ -151,6 +151,27 @@ export async function uploadCV(file: File): Promise<void> {
   if (!res.ok) throw new Error("Failed to upload CV");
 }
 
+export interface CVParsedJson {
+  summary?: string;
+  education?: unknown[];
+  experience?: unknown[];
+  skills?: unknown[];
+  languages?: unknown[];
+  projects?: unknown[];
+}
+
+export interface CVLatestResponse {
+  has_cv?: boolean;
+  parsed_json?: CVParsedJson | null;
+  suggestions?: string[];
+}
+
+export async function fetchLatestCV(): Promise<CVLatestResponse> {
+  const res = await apiFetch("/api/cv/latest");
+  if (!res.ok) throw new Error("Failed to fetch CV data");
+  return res.json();
+}
+
 export async function requestPasswordReset(email: string): Promise<MessageResponse> {
   const res = await apiFetch("/auth/forgot-password", {
     method: "POST",

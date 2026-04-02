@@ -19,11 +19,15 @@ from dependencies import get_current_user
 from database import engine, get_session
 from models import CVData, Job, UserPublic
 from services import llm_service
+from services.llm_service import ProviderError
 from worker import celery_app
 
 router = APIRouter()
 
 UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
+ALLOWED_CV_EXTENSIONS = {".pdf"}
+ALLOWED_CV_MIME_TYPES = {"application/pdf"}
+MAX_CV_UPLOAD_BYTES = 5 * 1024 * 1024
 
 
 class ScoreRequest(BaseModel):
@@ -66,25 +70,89 @@ class CVUploadResponse(BaseModel):
     filename: str
 
 
-def _extract_text_from_upload(data: bytes, filename: str) -> str:
-    is_pdf = filename.lower().endswith(".pdf")
-    if is_pdf:
-        try:
-            reader = PdfReader(io.BytesIO(data))
-            pages = [page.extract_text() or "" for page in reader.pages]
-            extracted = "\n".join(pages).strip()
-            if extracted:
-                return extracted[:50000]
-        except Exception:
-            # Fall back to plain text decoding below.
-            pass
+def _parse_stored_cv_payload(raw_payload: str) -> dict:
+    if not raw_payload.strip():
+        return {}
+    try:
+        parsed = json.loads(raw_payload)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
-    return data.decode("utf-8", errors="ignore")[:50000]
+
+def _validate_upload_metadata(file: UploadFile) -> str:
+    original_name = file.filename or ""
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in ALLOWED_CV_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only PDF CV uploads are supported",
+        )
+
+    content_type = (file.content_type or "").lower().strip()
+    if content_type and content_type not in ALLOWED_CV_MIME_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file must use the application/pdf content type",
+        )
+
+    return original_name or "cv_upload.pdf"
+
+
+async def _read_upload_bytes(file: UploadFile) -> bytes:
+    data = await file.read(MAX_CV_UPLOAD_BYTES + 1)
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded CV file is empty",
+        )
+    if len(data) > MAX_CV_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Uploaded CV exceeds the {MAX_CV_UPLOAD_BYTES // (1024 * 1024)}MB size limit",
+        )
+    return data
+
+
+def _validate_pdf_signature(data: bytes) -> None:
+    if not data.startswith(b"%PDF-"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is not a valid PDF document",
+        )
+
+
+def _delete_uploaded_file(path: Path | None) -> None:
+    if not path or not path.exists():
+        return
+    try:
+        path.unlink()
+        print(f"[backend] Deleted uploaded file: {path.name}")
+    except OSError as exc:
+        print(f"[backend] Failed to delete uploaded file {path.name}: {exc}")
+
+
+def _extract_text_from_upload(data: bytes, filename: str) -> str:
+    if not filename.lower().endswith(".pdf"):
+        return ""
+
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        pages = [page.extract_text() or "" for page in reader.pages]
+        extracted = "\n".join(pages).strip()
+        if extracted:
+            return extracted[:50000]
+    except Exception:
+        return ""
+
+    return ""
 
 
 def _fetch_cv_text(session: Session, user_id: int) -> str:
     row = session.get(CVData, user_id)
-    return row.extracted_text if row else ""
+    if not row:
+        return ""
+    return row.extracted_text.strip()
 
 
 def _fetch_jobs(session: Session, user_id: int, job_ids: List[int]) -> List[Job]:
@@ -185,34 +253,81 @@ async def upload_cv(
     current_user: UserPublic = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> CVUploadResponse:
-    UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"[backend] upload_cv started for user {current_user.id}, file {file.filename}")
+    destination: Path | None = None
+    old_destination: Path | None = None
+    safe_name = ""
+    try:
+        UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
-    original_name = file.filename or "cv_upload.bin"
-    safe_name = f"{uuid4().hex}_{Path(original_name).name}"
-    destination = UPLOADS_DIR / safe_name
+        original_name = _validate_upload_metadata(file)
+        safe_name = f"{uuid4().hex}_{Path(original_name).name}"
+        destination = UPLOADS_DIR / safe_name
 
-    data = await file.read()
-    destination.write_bytes(data)
+        data = await _read_upload_bytes(file)
+        print(f"[backend] file read, size: {len(data)} bytes")
+        _validate_pdf_signature(data)
 
-    extracted_text = _extract_text_from_upload(data, original_name)
-    structured_resume = await llm_service.parse_resume(extracted_text)
-
-    current = session.get(CVData, current_user.id)
-    if current:
-        current.filename = safe_name
-        current.extracted_text = structured_resume
-        current.last_updated = datetime.now(timezone.utc)
-        session.add(current)
-    else:
-        session.add(
-            CVData(
-                user_id=current_user.id,
-                filename=safe_name,
-                extracted_text=structured_resume,
-                last_updated=datetime.now(timezone.utc),
+        extracted_text = _extract_text_from_upload(data, original_name)
+        print(f"[backend] Extracted raw text length: {len(extracted_text)}")
+        if not extracted_text.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Could not extract readable text from the uploaded PDF",
             )
-        )
-    session.commit()
+
+        try:
+            structured_resume = await llm_service.parse_resume(extracted_text)
+            payload = _parse_stored_cv_payload(structured_resume)
+            print(
+                "[backend] LLM parsed resume successfully, "
+                f"payload_keys: {sorted(payload.keys()) if payload else []}"
+            )
+        except ProviderError as e:
+            print(f"[backend] ProviderError: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            print(f"[backend] Exception in parse_resume: {e}")
+            raise HTTPException(status_code=500, detail="An error occurred while parsing the resume")
+
+        destination.write_bytes(data)
+
+        current = session.get(CVData, current_user.id)
+        if current:
+            print("[backend] Updating existing CVData")
+            if current.filename:
+                candidate_old_destination = UPLOADS_DIR / current.filename
+                if candidate_old_destination != destination:
+                    old_destination = candidate_old_destination
+            current.filename = safe_name
+            current.extracted_text = extracted_text
+            current.parsed_json = structured_resume
+            current.last_updated = datetime.now(timezone.utc)
+            session.add(current)
+        else:
+            print("[backend] Creating new CVData")
+            session.add(
+                CVData(
+                    user_id=current_user.id,
+                    filename=safe_name,
+                    extracted_text=extracted_text,
+                    parsed_json=structured_resume,
+                    last_updated=datetime.now(timezone.utc),
+                )
+            )
+        try:
+            session.commit()
+        except Exception:
+            session.rollback()
+            _delete_uploaded_file(destination)
+            raise
+        print("[backend] Session committed successfully")
+        _delete_uploaded_file(old_destination)
+    except Exception:
+        _delete_uploaded_file(destination)
+        raise
+    finally:
+        await file.close()
 
     return CVUploadResponse(
         success=True,

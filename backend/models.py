@@ -28,6 +28,7 @@ class CVData(SQLModel, table=True):
     user_id: int = Field(primary_key=True, foreign_key="users.id")
     filename: str = Field(default="")
     extracted_text: str = Field(default="")
+    parsed_json: str = Field(default="")
     last_updated: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

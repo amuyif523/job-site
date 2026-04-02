@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchJobs, scoreAll } from "@/lib/api";
+import { fetchJobs, scoreAll, fetchLatestCV, CVLatestResponse } from "@/lib/api";
 import { Job } from "@/types/job";
 import { ParticleBackground } from "@/components/ParticleBackground";
 import { Sidebar, Section } from "@/components/JarvisSidebar";
@@ -20,20 +20,6 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 
-interface CVParsedJson {
-  summary?: string;
-  education?: unknown[];
-  experience?: unknown[];
-  skills?: unknown[];
-  languages?: unknown[];
-  projects?: unknown[];
-}
-
-interface CVLatestResponse {
-  parsed_json?: CVParsedJson | null;
-  suggestions?: string[];
-}
-
 export default function Index() {
   const [activeSection, setActiveSection] = useState<Section>("dashboard");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -47,17 +33,15 @@ export default function Index() {
     enabled: isAuthenticated,
   });
 
-  const { data: cvData } = useQuery<CVLatestResponse>({
+  const { data: cvData, isLoading: isCvLoading } = useQuery<CVLatestResponse>({
     queryKey: ["latestCV"],
-    queryFn: async () => {
-      const res = await fetch("http://localhost:8000/api/cv/latest", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch CV data");
-      return res.json();
-    },
+    queryFn: fetchLatestCV,
     enabled: isAuthenticated,
     staleTime: 0,
     refetchOnWindowFocus: true,
   });
+
+  const isGlobalLoading = isLoading || isCvLoading;
 
   const scoreMutation = useMutation({
     mutationFn: scoreAll,
@@ -75,10 +59,6 @@ export default function Index() {
   const handleLogout = () => {
     logout();
     setActiveSection("dashboard");
-  };
-
-  const handleDashboardUploadClick = () => {
-    setActiveSection("profile");
   };
 
   return (
@@ -111,7 +91,7 @@ export default function Index() {
         {/* Spacer for top bar */}
         <div className="h-10" />
 
-        {isLoading ? (
+        {isGlobalLoading ? (
           <div className="flex items-center justify-center h-[60vh]">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-jarvis-purple border-t-transparent" />
           </div>
@@ -121,7 +101,6 @@ export default function Index() {
               <Dashboard
                 jobs={jobs}
                 cvData={cvData ?? null}
-                onUploadClick={handleDashboardUploadClick}
                 onGenerateForJob={j => setGenerateJob(j)}
               />
             )}

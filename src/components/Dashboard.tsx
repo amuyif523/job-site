@@ -2,30 +2,16 @@ import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { Job } from "@/types/job";
 import { GlassCard } from "./GlassCard";
 import { ScoreRing } from "./ScoreRing";
-import { uploadCV } from "@/lib/api";
+import { uploadCV, CVLatestResponse } from "@/lib/api";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { Loader2, Play, Upload } from "lucide-react";
-
-interface CVParsedJson {
-  summary?: string;
-  education?: unknown[];
-  experience?: unknown[];
-  skills?: unknown[];
-  languages?: unknown[];
-  projects?: unknown[];
-}
-
-interface CVLatestResponse {
-  parsed_json?: CVParsedJson | null;
-  suggestions?: string[];
-}
+import { toast } from "@/hooks/use-toast";
 
 interface DashboardProps {
   jobs: Job[];
   onGenerateForJob: (job: Job) => void;
   cvData?: CVLatestResponse | null;
-  onUploadClick: () => void;
 }
 
 function AnimatedCounter({ value }: { value: number }) {
@@ -48,15 +34,7 @@ function AnimatedCounter({ value }: { value: number }) {
   return <span>{display}</span>;
 }
 
-function hasParsedResumeContent(parsed?: CVParsedJson | null): boolean {
-  if (!parsed) return false;
-  const summaryPresent = Boolean(parsed.summary && parsed.summary.trim().length > 0);
-  const listCount = [parsed.education, parsed.experience, parsed.skills, parsed.languages, parsed.projects].reduce(
-    (total, section) => total + (Array.isArray(section) ? section.length : 0),
-    0
-  );
-  return summaryPresent || listCount > 0;
-}
+
 
 function StepTwoCard() {
   return (
@@ -84,7 +62,7 @@ function StepTwoCard() {
   );
 }
 
-function EmptyOnboardingState({ onUploadClick }: { onUploadClick: () => void }) {
+function EmptyOnboardingState() {
   const fileRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
 
@@ -93,6 +71,9 @@ function EmptyOnboardingState({ onUploadClick }: { onUploadClick: () => void }) 
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["latestCV"] });
     },
+    onError: (err: any) => {
+      toast({ title: "Upload Failed", description: err.message || "Failed to process CV", variant: "destructive" });
+    }
   });
 
   const handleFile = (e: ChangeEvent<HTMLInputElement>) => {
@@ -116,7 +97,6 @@ function EmptyOnboardingState({ onUploadClick }: { onUploadClick: () => void }) 
         <button
           disabled={uploadMutation.isPending}
           onClick={() => {
-            onUploadClick();
             fileRef.current?.click();
           }}
           className="inline-flex items-center gap-2 px-5 py-3 rounded-md font-display font-semibold text-[12px] uppercase text-foreground transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-80 disabled:hover:scale-100"
@@ -136,8 +116,11 @@ function EmptyOnboardingState({ onUploadClick }: { onUploadClick: () => void }) 
   );
 }
 
-export function Dashboard({ jobs, onGenerateForJob, cvData, onUploadClick }: DashboardProps) {
-  const hasResumeData = hasParsedResumeContent(cvData?.parsed_json ?? null);
+export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
+  // Support legacy API response formats by dynamically assessing parsed_json if has_cv is undefined
+  const hasResumeData = cvData?.has_cv ?? (cvData?.parsed_json ? Object.keys(cvData.parsed_json).length > 0 : false) ?? false;
+
+  console.log("[Dashboard] Rendering with cvData present:", !!cvData, "hasResumeData:", hasResumeData);
   const scored = jobs.filter(j => j.score !== null);
   const kpis = [
     { label: "TOTAL JOBS", value: jobs.length },
@@ -165,7 +148,7 @@ export function Dashboard({ jobs, onGenerateForJob, cvData, onUploadClick }: Das
   if (!hasResumeData) {
     return (
       <div className="animate-fade-up space-y-6">
-        <EmptyOnboardingState onUploadClick={onUploadClick} />
+        <EmptyOnboardingState />
       </div>
     );
   }

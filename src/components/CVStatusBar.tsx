@@ -1,24 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { uploadCV } from "@/lib/api";
+import { uploadCV, fetchLatestCV, CVLatestResponse } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { Loader2, X } from "lucide-react";
 
-interface CVParsedJson {
-  summary?: string;
-  education?: unknown[];
-  experience?: unknown[];
-  skills?: unknown[];
-  languages?: unknown[];
-  projects?: unknown[];
-}
-
-interface CVLatestResponse {
-  parsed_json?: CVParsedJson | null;
-  suggestions?: string[];
-}
-
-const SECTION_KEYS: { key: keyof CVParsedJson; label: string }[] = [
+const SECTION_KEYS: { key: keyof NonNullable<CVLatestResponse["parsed_json"]>; label: string }[] = [
   { key: "summary", label: "Summary" },
   { key: "experience", label: "Experience" },
   { key: "education", label: "Education" },
@@ -60,7 +46,7 @@ function scoreListSection(items?: unknown[]): number {
   return 0;
 }
 
-function calculateStrength(parsed?: CVParsedJson | null): number {
+function calculateStrength(parsed?: CVLatestResponse["parsed_json"] | null): number {
   if (!parsed) return 0;
   const summaryScore = scoreSummary(parsed.summary);
   const skillsScore = scoreSkills(parsed.skills);
@@ -125,19 +111,14 @@ export function CVStatusBar() {
 
   const { data: cvData, isLoading: isCVLoading } = useQuery<CVLatestResponse>({
     queryKey: ["latestCV"],
-    queryFn: async () => {
-      const res = await fetch("http://localhost:8000/api/cv/latest", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch CV data");
-      return res.json();
-    },
+    queryFn: fetchLatestCV,
     enabled: true,
     staleTime: 0,
     refetchOnWindowFocus: true,
   });
 
   useEffect(() => {
-    const parsedJson = cvData?.parsed_json;
-    if (!isCVLoading && (!parsedJson || Object.keys(parsedJson).length === 0)) {
+    if (!isCVLoading && !cvData?.has_cv) {
       localStorage.removeItem("jarvis_cv_name");
       setCvName("");
       setPanelOpen(false);
@@ -218,7 +199,7 @@ export function CVStatusBar() {
           {/* Section checklist */}
           <div className="space-y-1 mb-3">
             {SECTION_KEYS.map((s) => {
-              const present = sectionPresent(cvData.parsed_json[s.key]);
+              const present = cvData.parsed_json ? sectionPresent(cvData.parsed_json[s.key]) : false;
               return (
                 <div key={s.key} className="flex items-center gap-2">
                   <span className={present ? "text-jarvis-green" : "text-jarvis-crimson"}>

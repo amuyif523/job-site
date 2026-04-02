@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -123,8 +123,114 @@ class AuthRouteTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["detail"], "Name is required")
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("Name is required", response.text)
+
+    def test_register_rejects_short_name(self) -> None:
+        response = self.client.post(
+            "/auth/register",
+            json={
+                "name": "A",
+                "email": "short-name@example.com",
+                "password": "StrongPass123",
+                "confirm_password": "StrongPass123",
+                "target_role": "Engineer",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("Name must be at least 2 characters", response.text)
+
+    def test_register_rejects_short_target_role(self) -> None:
+        response = self.client.post(
+            "/auth/register",
+            json={
+                "name": "Valid Name",
+                "email": "short-role@example.com",
+                "password": "StrongPass123",
+                "confirm_password": "StrongPass123",
+                "target_role": "A",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("Target role must be at least 2 characters", response.text)
+
+    def test_register_rejects_weak_password_without_uppercase(self) -> None:
+        response = self.client.post(
+            "/auth/register",
+            json={
+                "name": "Valid Name",
+                "email": "weak-upper@example.com",
+                "password": "lowercase123",
+                "confirm_password": "lowercase123",
+                "target_role": "Engineer",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("Password must include at least one uppercase letter", response.text)
+
+    def test_register_rejects_weak_password_without_number(self) -> None:
+        response = self.client.post(
+            "/auth/register",
+            json={
+                "name": "Valid Name",
+                "email": "weak-number@example.com",
+                "password": "LowercaseOnly",
+                "confirm_password": "LowercaseOnly",
+                "target_role": "Engineer",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("Password must include at least one number", response.text)
+
+    def test_register_rejects_password_mismatch(self) -> None:
+        response = self.client.post(
+            "/auth/register",
+            json={
+                "name": "Valid Name",
+                "email": "mismatch@example.com",
+                "password": "StrongPass123",
+                "confirm_password": "StrongPass124",
+                "target_role": "Engineer",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("Passwords do not match", response.text)
+
+    def test_register_trims_name_and_target_role_before_storage(self) -> None:
+        response = self.client.post(
+            "/auth/register",
+            json={
+                "name": "  Valid Name  ",
+                "email": "trimmed@example.com",
+                "password": "StrongPass123",
+                "confirm_password": "StrongPass123",
+                "target_role": "  Platform Engineer  ",
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["message"], "Account created successfully")
+
+        with Session(self.engine) as session:
+            user = session.exec(select(User).where(User.email == "trimmed@example.com")).first()
+            self.assertIsNotNone(user)
+            assert user is not None
+            self.assertEqual(user.name, "Valid Name")
+            self.assertEqual(user.target_role, "Platform Engineer")
+
+    def test_login_returns_consistent_success_message(self) -> None:
+        response = self.client.post(
+            "/auth/login",
+            json={"email": "existing@example.com", "password": "correct-password"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["message"], "Signed in successfully")
 
     def test_logout_invalidates_previous_token(self) -> None:
         login_response = self.client.post(

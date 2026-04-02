@@ -76,6 +76,7 @@ export interface UserData {
 }
 
 export interface AuthResponse {
+  message: string;
   user: UserData;
 }
 
@@ -102,16 +103,11 @@ export interface MessageResponse {
 }
 
 export async function apiLogin(email: string, password: string): Promise<AuthResponse> {
-  const res = await fetch(`${API_BASE}/auth/login`, {
+  const res = await apiFetch("/auth/login", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
     body: JSON.stringify({ email, password }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Login failed");
-  }
+  if (!res.ok) await throwApiError(res, "Login failed");
   return res.json();
 }
 
@@ -122,10 +118,8 @@ export async function apiRegister(
   confirmPassword: string,
   targetRole: string
 ): Promise<AuthResponse> {
-  const res = await fetch(`${API_BASE}/auth/register`, {
+  const res = await apiFetch("/auth/register", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
     body: JSON.stringify({
       name,
       email,
@@ -134,10 +128,7 @@ export async function apiRegister(
       target_role: targetRole,
     }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Registration failed");
-  }
+  if (!res.ok) await throwApiError(res, "Registration failed");
   return res.json();
 }
 

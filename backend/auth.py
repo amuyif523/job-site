@@ -178,22 +178,12 @@ def register(
         identifier=email,
     )
 
-    name = body.name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="Name is required")
-
-    if body.password != body.confirm_password:
-        raise HTTPException(status_code=400, detail="Passwords do not match")
-
-    if len(body.password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-
     existing = session.exec(select(User).where(User.email == email)).first()
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
 
     user = User(
-        name=name,
+        name=body.name,
         email=email,
         hashed_pw=hash_password(body.password),
         target_role=body.target_role or "",
@@ -207,7 +197,7 @@ def register(
     public_user = _to_user_public(user)
     token = create_token(public_user.id, public_user.email, user.token_version)
     _set_auth_cookie(response, token)
-    return AuthResponse(user=public_user)
+    return AuthResponse(message="Account created successfully", user=public_user)
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -233,7 +223,7 @@ def login(
     public_user = _to_user_public(user)
     token = create_token(public_user.id, public_user.email, user.token_version)
     _set_auth_cookie(response, token)
-    return AuthResponse(user=public_user)
+    return AuthResponse(message="Signed in successfully", user=public_user)
 
 
 @router.post("/logout")

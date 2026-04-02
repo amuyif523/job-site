@@ -1,0 +1,111 @@
+import { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import { Dashboard } from "@/components/Dashboard";
+import type { CVLatestResponse } from "@/lib/api";
+import type { Job } from "@/types/job";
+
+vi.mock("recharts", () => {
+  const Mock = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
+  return {
+    ResponsiveContainer: Mock,
+    BarChart: Mock,
+    Bar: Mock,
+    XAxis: Mock,
+    YAxis: Mock,
+    Tooltip: Mock,
+    Cell: () => <div />,
+  };
+});
+
+vi.mock("@/hooks/use-toast", () => ({
+  toast: vi.fn(),
+}));
+
+function renderDashboard(cvData: CVLatestResponse | null, jobs: Job[] = []) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <Dashboard jobs={jobs} cvData={cvData} onGenerateForJob={vi.fn()} />
+    </QueryClientProvider>
+  );
+}
+
+function createJob(overrides: Partial<Job> = {}): Job {
+  return {
+    id: 1,
+    title: "Frontend Engineer",
+    company: "Acme",
+    location: "Remote",
+    url: "https://example.com/jobs/1",
+    date_scraped: "2026-04-02T00:00:00.000Z",
+    description: "Build product experiences.",
+    score: 88,
+    score_reasoning: ["Strong product fit"],
+    red_flags: [],
+    status: "new",
+    notes: "",
+    events: [],
+    ...overrides,
+  };
+}
+
+describe("Dashboard state branching", () => {
+  it("renders onboarding recovery for no CV and no jobs", () => {
+    renderDashboard({ has_cv: false, status: "no_cv", parsed_json: {}, suggestions: [] }, []);
+
+    expect(screen.getByRole("heading", { name: "Upload Your Resume to Begin" })).toBeInTheDocument();
+    expect(screen.queryByText("Step 2: Find Opportunities")).not.toBeInTheDocument();
+    expect(screen.queryByText("TOP MATCHES")).not.toBeInTheDocument();
+  });
+
+  it("renders step two guidance for valid CV and no jobs", () => {
+    renderDashboard(
+      {
+        has_cv: true,
+        status: "ready",
+        readiness: { dashboard: true, scoring: true, parsed_payload: true, raw_text: true },
+        parsed_json: { summary: "Experienced engineer", skills: ["React", "TypeScript"] },
+        suggestions: [],
+      },
+      []
+    );
+
+    expect(screen.getByText("Step 2: Find Opportunities")).toBeInTheDocument();
+    expect(screen.queryByText("Upload Your Resume to Begin")).not.toBeInTheDocument();
+    expect(screen.queryByText("TOP MATCHES")).not.toBeInTheDocument();
+  });
+
+  it("renders top matches for valid CV and jobs", () => {
+    renderDashboard(
+      {
+        has_cv: true,
+        status: "ready",
+        readiness: { dashboard: true, scoring: true, parsed_payload: true, raw_text: true },
+        parsed_json: { summary: "Experienced engineer", skills: ["React", "TypeScript"] },
+        suggestions: [],
+      },
+      [createJob()]
+    );
+
+    expect(screen.getByText("TOP MATCHES")).toBeInTheDocument();
+    expect(screen.getByText("Frontend Engineer")).toBeInTheDocument();
+    expect(screen.queryByText("Step 2: Find Opportunities")).not.toBeInTheDocument();
+  });
+
+  it("renders recovery guidance for invalid or empty CV payloads", () => {
+    renderDashboard({ has_cv: true, status: "invalid", parsed_json: {}, suggestions: [] }, []);
+
+    expect(screen.getByText("We could not read your current CV")).toBeInTheDocument();
+    expect(screen.getByText("Re-upload CV")).toBeInTheDocument();
+    expect(screen.queryByText("TOP MATCHES")).not.toBeInTheDocument();
+  });
+});

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchJobs, fetchLatestCV, scoreAll, type CVLatestResponse } from "@/lib/api";
+import { fetchJobs, fetchLatestCV, fetchScoreAllStatus, scoreAll, type CVLatestResponse } from "@/lib/api";
 import { Job } from "@/types/job";
 import { ParticleBackground } from "@/components/ParticleBackground";
 import { Sidebar, Section } from "@/components/JarvisSidebar";
@@ -24,6 +24,8 @@ export default function Index() {
   const [activeSection, setActiveSection] = useState<Section>("dashboard");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [generateJob, setGenerateJob] = useState<Job | null>(null);
+  const [scoreTaskId, setScoreTaskId] = useState<string | null>(null);
+  const completionToastShownRef = useRef(false);
   const { isAuthenticated, isAuthLoading, user, setAuthenticatedUser, logout } = useAuth();
   const queryClient = useQueryClient();
 
@@ -46,11 +48,65 @@ export default function Index() {
   const scoreMutation = useMutation({
     mutationFn: scoreAll,
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      toast({ title: `Scored ${data.scored} jobs` });
+      completionToastShownRef.current = false;
+      setScoreTaskId(data.task_id);
+      toast({
+        title: "Scoring task queued",
+        description: data.message || "JARVIS has started scoring your jobs in the background.",
+      });
     },
-    onError: () => toast({ title: "Scoring failed", variant: "destructive" }),
+    onError: (error: Error) =>
+      toast({
+        title: "Failed to queue scoring",
+        description: error.message || "Scoring failed",
+        variant: "destructive",
+      }),
   });
+
+  const { data: scoreTaskStatus } = useQuery({
+    queryKey: ["scoreAllStatus", scoreTaskId],
+    queryFn: () => fetchScoreAllStatus(scoreTaskId!),
+    enabled: isAuthenticated && !!scoreTaskId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "SUCCESS" || status === "FAILURE" ? false : 3000;
+    },
+  });
+
+  useEffect(() => {
+    if (!scoreTaskId || !scoreTaskStatus || completionToastShownRef.current) {
+      return;
+    }
+
+    if (scoreTaskStatus.status === "SUCCESS") {
+      completionToastShownRef.current = true;
+      setScoreTaskId(null);
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+
+      const scored = scoreTaskStatus.result?.scored ?? 0;
+      const errors = scoreTaskStatus.result?.errors ?? [];
+      const errorSummary = errors.length ? ` ${errors.length} jobs returned errors.` : "";
+
+      toast({
+        title: "Scoring complete",
+        description: `JARVIS finished scoring ${scored} job${scored === 1 ? "" : "s"}.${errorSummary}`,
+      });
+      return;
+    }
+
+    if (scoreTaskStatus.status === "FAILURE") {
+      completionToastShownRef.current = true;
+      setScoreTaskId(null);
+      toast({
+        title: "Scoring task failed",
+        description: scoreTaskStatus.error || "The background scoring worker failed.",
+        variant: "destructive",
+      });
+    }
+  }, [queryClient, scoreTaskId, scoreTaskStatus]);
+
+  const isScoringQueued = !!scoreTaskId;
+  const isScoring = scoreMutation.isPending || isScoringQueued;
 
   const handleLogin = (userData: UserData) => {
     setAuthenticatedUser(userData);
@@ -105,7 +161,7 @@ export default function Index() {
               />
             )}
             {activeSection === "jobs" && (
-              <JobFeed jobs={jobs} onGenerateForJob={j => setGenerateJob(j)} onScoreAll={() => scoreMutation.mutate()} isScoring={scoreMutation.isPending} />
+              <JobFeed jobs={jobs} onGenerateForJob={j => setGenerateJob(j)} onScoreAll={() => scoreMutation.mutate()} isScoring={isScoring} />
             )}
             {activeSection === "applications" && (
               <Applications jobs={jobs} onViewJob={() => setActiveSection("jobs")} />

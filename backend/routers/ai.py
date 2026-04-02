@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import List
 from uuid import uuid4
 
-from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 from sqlmodel import Session, select
@@ -68,6 +68,13 @@ class CVUploadResponse(BaseModel):
     success: bool
     message: str
     filename: str
+
+
+class TaskStatusResponse(BaseModel):
+    task_id: str
+    status: str
+    result: dict | None = None
+    error: str | None = None
 
 
 def _parse_stored_cv_payload(raw_payload: str) -> dict:
@@ -170,7 +177,12 @@ def score_jobs_task(user_id: int, job_ids: List[int] | None = None) -> dict:
     with Session(engine) as session:
         cv_text = _fetch_cv_text(session, user_id)
         if not cv_text.strip():
-            return {"scored": 0, "errors": ["No CV extracted text found"]}
+            return {
+                "scored": 0,
+                "errors": [
+                    "CV is not ready for scoring. Re-upload a resume with readable text before scoring jobs."
+                ],
+            }
 
         job_rows = _fetch_jobs(session, user_id, selected_ids)
         if not job_rows:
@@ -228,6 +240,20 @@ def score_all(
         status="queued",
         message="Scoring task started",
     )
+
+
+@router.get("/score-all/status", response_model=TaskStatusResponse)
+def score_all_status(
+    task_id: str = Query(..., description="Celery task identifier"),
+    current_user: UserPublic = Depends(get_current_user),
+) -> TaskStatusResponse:
+    result = celery_app.AsyncResult(task_id)
+    payload = TaskStatusResponse(task_id=task_id, status=result.status)
+    if result.successful():
+        payload.result = result.result
+    if result.failed():
+        payload.error = str(result.result)
+    return payload
 
 
 @router.post("/generate/{job_id}", response_model=GenerateResponse)

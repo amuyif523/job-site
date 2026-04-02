@@ -2,7 +2,7 @@ import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { Job } from "@/types/job";
 import { GlassCard } from "./GlassCard";
 import { ScoreRing } from "./ScoreRing";
-import { getCVUiState, uploadCV, type CVLatestResponse } from "@/lib/api";
+import { getCVUiState, uploadCV, type CVLatestResponse, type CVUiState } from "@/lib/api";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { Loader2, Play, Upload } from "lucide-react";
@@ -13,6 +13,8 @@ interface DashboardProps {
   onGenerateForJob: (job: Job) => void;
   cvData?: CVLatestResponse | null;
 }
+
+type DashboardView = "recovery" | "step_two" | "ready_with_jobs";
 
 function AnimatedCounter({ value }: { value: number }) {
   const [display, setDisplay] = useState(0);
@@ -59,6 +61,18 @@ function StepTwoCard() {
       </div>
     </GlassCard>
   );
+}
+
+function getDashboardView(cvState: CVUiState, jobs: Job[]): DashboardView {
+  if (cvState !== "ready") {
+    return "recovery";
+  }
+
+  if (jobs.length === 0) {
+    return "step_two";
+  }
+
+  return "ready_with_jobs";
 }
 
 function CVRecoveryState({
@@ -135,7 +149,7 @@ function CVRecoveryState({
 
 export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
   const cvState = getCVUiState(cvData, false);
-  const hasResumeData = cvState === "ready";
+  const dashboardView = getDashboardView(cvState, jobs);
   const scored = jobs.filter(j => j.score !== null);
   const kpis = [
     { label: "TOTAL JOBS", value: jobs.length },
@@ -160,7 +174,7 @@ export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
     return map[s] || "#6B7280";
   };
 
-  if (cvState === "no_cv") {
+  if (dashboardView === "recovery" && cvState === "no_cv") {
     return (
       <div className="animate-fade-up space-y-6">
         <CVRecoveryState
@@ -173,7 +187,7 @@ export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
     );
   }
 
-  if (cvState === "uploading") {
+  if (dashboardView === "recovery" && cvState === "uploading") {
     return (
       <div className="animate-fade-up space-y-6">
         <CVRecoveryState
@@ -186,7 +200,7 @@ export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
     );
   }
 
-  if (cvState === "incomplete") {
+  if (dashboardView === "recovery" && cvState === "incomplete") {
     return (
       <div className="animate-fade-up space-y-6">
         <CVRecoveryState
@@ -199,7 +213,7 @@ export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
     );
   }
 
-  if (cvState === "invalid") {
+  if (dashboardView === "recovery" && cvState === "invalid") {
     return (
       <div className="animate-fade-up space-y-6">
         <CVRecoveryState
@@ -227,8 +241,8 @@ export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
         ))}
       </div>
 
-      {/* Today's Top Matches */}
-      {topMatches.length > 0 ? (
+      {/* Dashboard focus area */}
+      {dashboardView === "ready_with_jobs" ? (
         <div>
           <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-3">TOP MATCHES</p>
           <div className="grid grid-cols-3 gap-4">
@@ -256,18 +270,9 @@ export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
             ))}
           </div>
         </div>
-      ) : jobs.length === 0 && hasResumeData ? (
+      ) : (
         <StepTwoCard />
-      ) : jobs.length === 0 ? (
-        <GlassCard className="p-8 text-center" hover={false}>
-          <p className="font-display font-semibold text-foreground mb-2">No jobs yet</p>
-          <p className="font-mono text-[11px] text-muted-foreground mb-4">Click SCRAPE in the sidebar to discover opportunities</p>
-          <div className="flex items-center justify-center gap-2">
-            <Play className="h-4 w-4 text-jarvis-crimson" />
-            <span className="font-mono text-[11px] text-jarvis-crimson animate-pulse">Use the scraper to get started</span>
-          </div>
-        </GlassCard>
-      ) : null}
+      )}
 
       {/* Score Distribution — always show */}
       <GlassCard className="p-5" hover={false}>

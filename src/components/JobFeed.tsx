@@ -105,7 +105,7 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring }: JobFe
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md font-display text-[11px] font-medium uppercase border border-jarvis-purple/40 text-jarvis-purple hover:bg-jarvis-purple hover:text-foreground transition-all"
             >
               {isScoring ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-              Score All
+              {isScoring ? "Scoring..." : "Score All"}
             </button>
           )}
         </div>

@@ -85,6 +85,18 @@ export interface TaskQueuedResponse {
   message: string;
 }
 
+export interface ScoreTaskResult {
+  scored?: number;
+  errors?: string[];
+}
+
+export interface TaskStatusResponse {
+  task_id: string;
+  status: string;
+  result?: ScoreTaskResult;
+  error?: string | null;
+}
+
 export interface MessageResponse {
   message: string;
 }
@@ -183,6 +195,12 @@ export async function scoreAll(): Promise<TaskQueuedResponse> {
   return res.json();
 }
 
+export async function fetchScoreAllStatus(taskId: string): Promise<TaskStatusResponse> {
+  const res = await apiFetch(`/api/score-all/status?task_id=${encodeURIComponent(taskId)}`);
+  if (!res.ok) await throwApiError(res, "Failed to fetch scoring task status");
+  return res.json();
+}
+
 export async function generateDocuments(id: number): Promise<{ cv_url: string; cover_letter_url: string }> {
   const res = await apiFetch(`/api/generate/${id}`, { method: "POST" });
   if (!res.ok) await throwApiError(res, "Failed to generate documents");
@@ -208,6 +226,12 @@ export interface CVParsedJson {
 export interface CVLatestResponse {
   has_cv?: boolean;
   status?: "no_cv" | "ready" | "incomplete" | "invalid";
+  readiness?: {
+    dashboard?: boolean;
+    scoring?: boolean;
+    parsed_payload?: boolean;
+    raw_text?: boolean;
+  };
   parsed_json?: CVParsedJson | null;
   suggestions?: string[];
 }
@@ -235,10 +259,13 @@ export function hasParsedResumeContent(parsed?: CVParsedJson | null): boolean {
 export function getCVUiState(cvData?: CVLatestResponse | null, isUploading = false): CVUiState {
   if (isUploading) return "uploading";
 
-  if (!cvData?.has_cv) return "no_cv";
+  const hasAnyCv = Boolean(cvData?.has_cv);
+  if (!hasAnyCv) return "no_cv";
+
+  if (cvData?.readiness?.dashboard) return "ready";
 
   if (cvData.status === "invalid" || cvData.status === "incomplete" || cvData.status === "ready") {
-    return cvData.status;
+    return cvData.status === "ready" ? "ready" : cvData.status;
   }
 
   return hasParsedResumeContent(cvData.parsed_json ?? null) ? "ready" : "incomplete";

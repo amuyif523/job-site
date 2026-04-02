@@ -16,9 +16,17 @@ from models import CVData, UserPublic
 router = APIRouter()
 
 
+class CVReadinessResponse(BaseModel):
+    dashboard: bool = Field(default=False)
+    scoring: bool = Field(default=False)
+    parsed_payload: bool = Field(default=False)
+    raw_text: bool = Field(default=False)
+
+
 class CVLatestResponse(BaseModel):
     has_cv: bool = Field(default=False)
     status: str = Field(default="no_cv")
+    readiness: CVReadinessResponse = Field(default_factory=CVReadinessResponse)
     parsed_json: dict[str, Any] = Field(default_factory=dict)
     suggestions: list[str] = Field(default_factory=list)
 
@@ -50,6 +58,10 @@ def _has_parsed_resume_content(parsed_json: dict[str, Any]) -> bool:
     return False
 
 
+def _has_raw_cv_text(row: CVData) -> bool:
+    return bool((row.extracted_text or "").strip())
+
+
 @router.get("/latest", response_model=CVLatestResponse)
 def get_latest_cv(
     current_user: UserPublic = Depends(get_current_user),
@@ -71,14 +83,21 @@ def get_latest_cv(
 
     print("[backend] get_latest_cv: Row found, returning data")
     parsed = _load_stored_payload(row)
+    has_raw_text = _has_raw_cv_text(row)
+
     if not parsed:
         payload = CVLatestResponse()
         payload.has_cv = True
         payload.status = "invalid"
+        payload.readiness.raw_text = has_raw_text
+        payload.readiness.scoring = has_raw_text
         return payload
 
     payload = CVLatestResponse()
     payload.has_cv = True
+    payload.readiness.parsed_payload = True
+    payload.readiness.raw_text = has_raw_text
+    payload.readiness.scoring = has_raw_text
 
     parsed_json = parsed.get("parsed_json")
     if isinstance(parsed_json, dict):
@@ -96,6 +115,7 @@ def get_latest_cv(
     if isinstance(suggestions, list):
         payload.suggestions = [str(item) for item in suggestions]
 
-    payload.status = "ready" if _has_parsed_resume_content(payload.parsed_json) else "incomplete"
+    payload.readiness.dashboard = _has_parsed_resume_content(payload.parsed_json)
+    payload.status = "ready" if payload.readiness.dashboard else "incomplete"
 
     return payload

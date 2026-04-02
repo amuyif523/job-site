@@ -137,7 +137,7 @@ export function CVStatusBar() {
   });
 
   useEffect(() => {
-    if (!isCVLoading && !cvData?.has_cv) {
+    if (!isCVLoading && getCVUiState(cvData, false) === "no_cv") {
       persistCvName("");
       setPanelOpen(false);
     }

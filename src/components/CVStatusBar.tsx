@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { uploadCV, fetchLatestCV, CVLatestResponse } from "@/lib/api";
+import { fetchLatestCV, uploadCV, type CVLatestResponse } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { Loader2, X } from "lucide-react";
 
@@ -106,7 +106,13 @@ export function CVStatusBar() {
       toast({ title: "CV uploaded successfully" });
       queryClient.invalidateQueries({ queryKey: ["latestCV"] });
     },
-    onError: () => toast({ title: "Failed to upload CV", variant: "destructive" }),
+    onError: (error: Error) => {
+      toast({
+        title: "CV upload failed",
+        description: error.message || "Failed to upload CV",
+        variant: "destructive",
+      });
+    },
   });
 
   const { data: cvData, isLoading: isCVLoading } = useQuery<CVLatestResponse>({

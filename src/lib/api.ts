@@ -2,6 +2,16 @@ import { Job, JobStatus } from "@/types/job.ts";
 
 const API_BASE = "http://localhost:8000";
 
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 function getHeaders(withJson = true): Record<string, string> {
   const headers: Record<string, string> = {};
   if (withJson) headers["Content-Type"] = "application/json";
@@ -18,6 +28,41 @@ async function apiFetch(path: string, init?: RequestInit, isFormData = false): P
     headers,
     credentials: "include",
   });
+}
+
+async function getErrorMessage(res: Response, fallbackMessage: string): Promise<string> {
+  const err = await res.json().catch(() => ({}));
+  const detail = err?.detail;
+
+  if (typeof detail === "string" && detail.trim()) {
+    return detail;
+  }
+
+  if (Array.isArray(detail)) {
+    const joined = detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item.msg === "string") return item.msg;
+        return "";
+      })
+      .filter(Boolean)
+      .join("; ");
+
+    if (joined) {
+      return joined;
+    }
+  }
+
+  if (typeof err?.message === "string" && err.message.trim()) {
+    return err.message;
+  }
+
+  return fallbackMessage;
+}
+
+async function throwApiError(res: Response, fallbackMessage: string): Promise<never> {
+  const message = await getErrorMessage(res, fallbackMessage);
+  throw new ApiError(message, res.status);
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -100,13 +145,13 @@ export async function apiGetMe(): Promise<UserData> {
 // ── Jobs ──────────────────────────────────────────────────────────────────────
 export async function fetchJobs(): Promise<Job[]> {
   const res = await apiFetch("/api/jobs");
-  if (!res.ok) throw new Error("Failed to fetch jobs");
+  if (!res.ok) await throwApiError(res, "Failed to fetch jobs");
   return res.json();
 }
 
 export async function fetchJob(id: number): Promise<Job> {
   const res = await apiFetch(`/api/jobs/${id}`);
-  if (!res.ok) throw new Error("Failed to fetch job");
+  if (!res.ok) await throwApiError(res, "Failed to fetch job");
   return res.json();
 }
 
@@ -115,7 +160,7 @@ export async function updateJobStatus(id: number, status: JobStatus): Promise<vo
     method: "PATCH",
     body: JSON.stringify({ status }),
   });
-  if (!res.ok) throw new Error("Failed to update status");
+  if (!res.ok) await throwApiError(res, "Failed to update status");
 }
 
 export async function updateJobNotes(id: number, notes: string): Promise<void> {
@@ -123,24 +168,24 @@ export async function updateJobNotes(id: number, notes: string): Promise<void> {
     method: "PATCH",
     body: JSON.stringify({ notes }),
   });
-  if (!res.ok) throw new Error("Failed to update notes");
+  if (!res.ok) await throwApiError(res, "Failed to update notes");
 }
 
 export async function runScraper(): Promise<TaskQueuedResponse> {
   const res = await apiFetch("/api/scrape", { method: "POST" });
-  if (!res.ok) throw new Error("Failed to run scraper");
+  if (!res.ok) await throwApiError(res, "Failed to run scraper");
   return res.json();
 }
 
 export async function scoreAll(): Promise<TaskQueuedResponse> {
   const res = await apiFetch("/api/score-all", { method: "POST" });
-  if (!res.ok) throw new Error("Failed to score jobs");
+  if (!res.ok) await throwApiError(res, "Failed to score jobs");
   return res.json();
 }
 
 export async function generateDocuments(id: number): Promise<{ cv_url: string; cover_letter_url: string }> {
   const res = await apiFetch(`/api/generate/${id}`, { method: "POST" });
-  if (!res.ok) throw new Error("Failed to generate documents");
+  if (!res.ok) await throwApiError(res, "Failed to generate documents");
   return res.json();
 }
 
@@ -148,7 +193,7 @@ export async function uploadCV(file: File): Promise<void> {
   const formData = new FormData();
   formData.append("file", file);
   const res = await apiFetch("/api/ai/upload_cv", { method: "POST", body: formData }, true);
-  if (!res.ok) throw new Error("Failed to upload CV");
+  if (!res.ok) await throwApiError(res, "Failed to upload CV");
 }
 
 export interface CVParsedJson {
@@ -168,7 +213,7 @@ export interface CVLatestResponse {
 
 export async function fetchLatestCV(): Promise<CVLatestResponse> {
   const res = await apiFetch("/api/cv/latest");
-  if (!res.ok) throw new Error("Failed to fetch CV data");
+  if (!res.ok) await throwApiError(res, "Failed to fetch CV data");
   return res.json();
 }
 
@@ -177,10 +222,7 @@ export async function requestPasswordReset(email: string): Promise<MessageRespon
     method: "POST",
     body: JSON.stringify({ email }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Failed to request password reset");
-  }
+  if (!res.ok) await throwApiError(res, "Failed to request password reset");
   return res.json();
 }
 
@@ -189,9 +231,6 @@ export async function resetPassword(token: string, newPassword: string): Promise
     method: "POST",
     body: JSON.stringify({ token, new_password: newPassword }),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Failed to reset password");
-  }
+  if (!res.ok) await throwApiError(res, "Failed to reset password");
   return res.json();
 }

@@ -2,7 +2,7 @@ import { ChangeEvent, useEffect, useRef, useState } from "react";
 import { Job } from "@/types/job";
 import { GlassCard } from "./GlassCard";
 import { ScoreRing } from "./ScoreRing";
-import { uploadCV, CVLatestResponse } from "@/lib/api";
+import { uploadCV, type CVLatestResponse, type CVParsedJson } from "@/lib/api";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { Loader2, Play, Upload } from "lucide-react";
@@ -71,9 +71,13 @@ function EmptyOnboardingState() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["latestCV"] });
     },
-    onError: (err: any) => {
-      toast({ title: "Upload Failed", description: err.message || "Failed to process CV", variant: "destructive" });
-    }
+    onError: (error: Error) => {
+      toast({
+        title: "CV upload failed",
+        description: error.message || "Failed to upload CV",
+        variant: "destructive",
+      });
+    },
   });
 
   const handleFile = (e: ChangeEvent<HTMLInputElement>) => {

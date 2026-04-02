@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchJobs, scoreAll, fetchLatestCV, CVLatestResponse } from "@/lib/api";
+import { fetchJobs, fetchLatestCV, scoreAll, type CVLatestResponse } from "@/lib/api";
 import { Job } from "@/types/job";
 import { ParticleBackground } from "@/components/ParticleBackground";
 import { Sidebar, Section } from "@/components/JarvisSidebar";

@@ -178,6 +178,7 @@ def generate_documents(
     )
 
 
+@router.post("/ai/upload_cv", response_model=CVUploadResponse)
 @router.post("/cv", response_model=CVUploadResponse)
 async def upload_cv(
     file: UploadFile = File(...),

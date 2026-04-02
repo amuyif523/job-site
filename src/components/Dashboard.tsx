@@ -5,7 +5,7 @@ import { ScoreRing } from "./ScoreRing";
 import { uploadCV } from "@/lib/api";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
-import { Play, Upload } from "lucide-react";
+import { Loader2, Play, Upload } from "lucide-react";
 
 interface CVParsedJson {
   summary?: string;
@@ -58,6 +58,32 @@ function hasParsedResumeContent(parsed?: CVParsedJson | null): boolean {
   return summaryPresent || listCount > 0;
 }
 
+function StepTwoCard() {
+  return (
+    <GlassCard className="p-8 md:p-10 min-h-[220px] flex items-center justify-between gap-6 overflow-hidden relative" hover={false}>
+      <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-jarvis-blue via-jarvis-purple to-jarvis-green" />
+      <div className="max-w-2xl space-y-4">
+        <p className="font-mono text-[10px] uppercase tracking-[0.35em] text-jarvis-blue">Step 2: Find Opportunities</p>
+        <h2 className="font-display font-bold text-3xl md:text-5xl text-foreground leading-tight">
+          Start the job scraper next
+        </h2>
+        <p className="font-display text-sm md:text-base text-muted-foreground max-w-xl">
+          Click the Play icon in the sidebar to start the job scraper.
+        </p>
+        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-jarvis-blue/30 bg-jarvis-blue/10 text-jarvis-blue font-mono text-[11px] uppercase tracking-[0.25em]">
+          <Play className="h-4 w-4" />
+          Use the sidebar Play action
+        </div>
+      </div>
+      <div className="hidden md:flex flex-col items-end text-right gap-2 text-muted-foreground font-mono text-[11px]">
+        <span>Resume parsed</span>
+        <span>Now discover jobs</span>
+        <span>Then apply faster</span>
+      </div>
+    </GlassCard>
+  );
+}
+
 function EmptyOnboardingState({ onUploadClick }: { onUploadClick: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
@@ -88,15 +114,16 @@ function EmptyOnboardingState({ onUploadClick }: { onUploadClick: () => void }) 
           Upload your resume to unlock AI parsing, strength scoring, and tailored job recommendations.
         </p>
         <button
+          disabled={uploadMutation.isPending}
           onClick={() => {
             onUploadClick();
             fileRef.current?.click();
           }}
-          className="inline-flex items-center gap-2 px-5 py-3 rounded-md font-display font-semibold text-[12px] uppercase text-foreground transition-all hover:scale-[1.02]"
+          className="inline-flex items-center gap-2 px-5 py-3 rounded-md font-display font-semibold text-[12px] uppercase text-foreground transition-all hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-80 disabled:hover:scale-100"
           style={{ background: "linear-gradient(135deg, #8B5CF6, #3B82F6)", boxShadow: "0 0 20px rgba(139,92,246,0.35)" }}
         >
-          <Upload className="h-4 w-4" />
-          Upload Your Resume to Begin
+          {uploadMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+          {uploadMutation.isPending ? "JARVIS is analyzing your CV..." : "Upload Your Resume to Begin"}
         </button>
         <input ref={fileRef} type="file" accept=".pdf" className="hidden" onChange={handleFile} />
       </div>
@@ -110,6 +137,7 @@ function EmptyOnboardingState({ onUploadClick }: { onUploadClick: () => void }) 
 }
 
 export function Dashboard({ jobs, onGenerateForJob, cvData, onUploadClick }: DashboardProps) {
+  const hasResumeData = hasParsedResumeContent(cvData?.parsed_json ?? null);
   const scored = jobs.filter(j => j.score !== null);
   const kpis = [
     { label: "TOTAL JOBS", value: jobs.length },
@@ -130,11 +158,11 @@ export function Dashboard({ jobs, onGenerateForJob, cvData, onUploadClick }: Das
   ];
 
   const statusColor = (s: string) => {
-    const map: Record<string, string> = { new: "#6B7280", scored: "#06B6D4", selected: "#3B82F6", applied: "#10B981", rejected: "#E11D48" };
+    const map: Record<string, string> = { new: "#6B7280", scored: "#06B6D4", selected: "#3B82F6", applied: "#10B981", interviewing: "#F59E0B", offered: "#8B5CF6", rejected: "#E11D48" };
     return map[s] || "#6B7280";
   };
 
-  if (!hasParsedResumeContent(cvData?.parsed_json ?? null)) {
+  if (!hasResumeData) {
     return (
       <div className="animate-fade-up space-y-6">
         <EmptyOnboardingState onUploadClick={onUploadClick} />
@@ -186,6 +214,8 @@ export function Dashboard({ jobs, onGenerateForJob, cvData, onUploadClick }: Das
             ))}
           </div>
         </div>
+      ) : jobs.length === 0 && hasResumeData ? (
+        <StepTwoCard />
       ) : jobs.length === 0 ? (
         <GlassCard className="p-8 text-center" hover={false}>
           <p className="font-display font-semibold text-foreground mb-2">No jobs yet</p>

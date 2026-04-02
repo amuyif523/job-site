@@ -16,9 +16,9 @@ interface JobFeedProps {
 }
 
 const statusColors: Record<string, string> = {
-  new: "#6B7280", scored: "#06B6D4", selected: "#3B82F6", applied: "#10B981", rejected: "#E11D48",
+  new: "#6B7280", scored: "#06B6D4", selected: "#3B82F6", applied: "#10B981", interviewing: "#F59E0B", offered: "#8B5CF6", rejected: "#E11D48",
 };
-const allStatuses = ["all", "new", "scored", "selected", "applied", "rejected"];
+const allStatuses = ["all", "new", "scored", "selected", "applied", "interviewing", "offered", "rejected"];
 
 export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring }: JobFeedProps) {
   const [search, setSearch] = useState("");
@@ -185,6 +185,12 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring }: JobFe
                       style={{ background: "linear-gradient(135deg, #8B5CF6, #3B82F6)" }}
                     >
                       ⚡ Generate Application
+                    </button>
+                    <button
+                      onClick={() => statusMutation.mutate({ id: selected.id, status: "interviewing" })}
+                      className="px-3 py-2 rounded-md font-display text-xs font-semibold uppercase border border-jarvis-yellow/50 text-jarvis-yellow hover:bg-jarvis-yellow hover:text-foreground transition-all hover:scale-[1.02]"
+                    >
+                      ✓ Mark Interviewing
                     </button>
                     <button
                       onClick={() => statusMutation.mutate({ id: selected.id, status: "applied" })}

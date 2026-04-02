@@ -101,7 +101,7 @@ def update_status(
     current_user: UserPublic = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    valid = {"new", "scored", "selected", "applied", "rejected"}
+    valid = {"new", "scored", "selected", "applied", "interviewing", "offered", "rejected"}
     if body.status not in valid:
         raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid}")
 

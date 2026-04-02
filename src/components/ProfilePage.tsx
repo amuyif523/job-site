@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { GlassCard } from "./GlassCard";
 import { Download, Pencil, Check } from "lucide-react";
 import { UserData } from "./ProfileDropdown";
+import { Job } from "@/types/job";
 
 function AnimatedCounter({ value }: { value: number }) {
   const [display, setDisplay] = useState(0);
@@ -23,21 +24,55 @@ function AnimatedCounter({ value }: { value: number }) {
 
 interface ProfilePageProps {
   user: UserData;
+  jobs: Job[];
 }
 
-export function ProfilePage({ user }: ProfilePageProps) {
-  const initials = user.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
-  const kpis = [
-    { label: "APPLICATIONS SENT", value: 24 },
-    { label: "CALLBACK RATE", value: 34, suffix: "%" },
-    { label: "AVG MATCH SCORE", value: 78 },
-    { label: "DOCS GENERATED", value: 41 },
-  ];
+function formatActivityLabel(job: Job): string {
+  const statusLabel = job.status.replace(/_/g, " ");
+  return `${job.title} · ${job.company} · ${statusLabel}`;
+}
 
-  const documents = [
-    { name: "CV_Deloitte_EN.pdf", job: "Senior Analyst — Deloitte", date: "Mar 12, 2026", lang: "EN" },
-    { name: "CoverLetter_TUV_DE.pdf", job: "Prüfingenieur — TÜV", date: "Mar 10, 2026", lang: "DE" },
-    { name: "CV_Mercedes_EN.pdf", job: "Data Engineer — Mercedes", date: "Mar 8, 2026", lang: "EN" },
+function getLatestJobTimestamp(job: Job): number {
+  const eventTimes = (job.events ?? [])
+    .map((event) => new Date(event.timestamp).getTime())
+    .filter((time) => Number.isFinite(time));
+  if (eventTimes.length > 0) {
+    return Math.max(...eventTimes);
+  }
+  const scrapedAt = new Date(job.date_scraped).getTime();
+  return Number.isFinite(scrapedAt) ? scrapedAt : 0;
+}
+
+function hasReachedInterviewOrOffer(job: Job): boolean {
+  const events = job.events ?? [];
+  return events.some((event) => event.type === "interviewing" || event.type === "offered") || job.status === "interviewing" || job.status === "offered";
+}
+
+function wasApplied(job: Job): boolean {
+  const events = job.events ?? [];
+  return job.status === "applied" || events.some((event) => event.type === "applied");
+}
+
+export function ProfilePage({ user, jobs }: ProfilePageProps) {
+  const initials = user.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
+  const applicationsSent = jobs.filter(j => j.status === "applied").length;
+  const callbacks = jobs.filter(j => j.status === "interviewing").length;
+  const appliedHistory = jobs.filter(wasApplied);
+  const successfulApplications = appliedHistory.filter(hasReachedInterviewOrOffer).length;
+  const successRate = appliedHistory.length > 0 ? Math.round((successfulApplications / appliedHistory.length) * 100) : 0;
+  const avgMatchScore = jobs.length
+    ? Math.round(jobs.filter(j => j.score !== null).reduce((sum, job) => sum + (job.score ?? 0), 0) / Math.max(1, jobs.filter(j => j.score !== null).length))
+    : 0;
+
+  const recentActivity = [...jobs]
+    .sort((a, b) => getLatestJobTimestamp(b) - getLatestJobTimestamp(a))
+    .slice(0, 3);
+
+  const kpis = [
+    { label: "APPLICATIONS SENT", value: applicationsSent },
+    { label: "CALLBACKS / INTERVIEWS", value: callbacks },
+    { label: "SUCCESS RATE", value: successRate, suffix: "%" },
+    { label: "AVG MATCH SCORE", value: avgMatchScore },
   ];
 
   const linkedAccounts = [
@@ -55,7 +90,7 @@ export function ProfilePage({ user }: ProfilePageProps) {
         </div>
         <div className="flex-1">
           <h1 className="font-display font-bold text-2xl text-foreground">{user.name}</h1>
-          <p className="font-mono text-[13px] text-muted-foreground">{user.role}</p>
+          <p className="font-mono text-[13px] text-muted-foreground">{user.target_role}</p>
           <span className="font-mono text-[9px] uppercase px-2 py-0.5 rounded-full mt-1 inline-block" style={user.plan === "Pro" ? { background: "linear-gradient(135deg, #8B5CF6, #3B82F6)", color: "white" } : { background: "rgba(107,114,128,0.2)", color: "#6B7280" }}>
             {user.plan} Plan
           </span>
@@ -82,19 +117,22 @@ export function ProfilePage({ user }: ProfilePageProps) {
       <div className="grid grid-cols-2 gap-6">
         <div className="space-y-6">
           <GlassCard className="p-5" hover={false}>
-            <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">MY DOCUMENTS LIBRARY</p>
+            <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">RECENT ACTIVITY</p>
             <div className="space-y-2">
-              {documents.map(doc => (
-                <div key={doc.name} className="flex items-center gap-3 p-2.5 rounded-md hover:bg-foreground/[0.025] transition-colors">
+              {recentActivity.length === 0 ? (
+                <div className="rounded-md border border-dashed border-foreground/[0.06] px-3 py-6 text-center">
+                  <p className="font-mono text-[10px] text-muted-foreground">No activity yet</p>
+                </div>
+              ) : recentActivity.map(job => (
+                <div key={job.id} className="flex items-center gap-3 p-2.5 rounded-md hover:bg-foreground/[0.025] transition-colors">
                   <div className="h-8 w-8 rounded flex items-center justify-center glass-surface">
                     <Download className="h-3.5 w-3.5 text-jarvis-purple" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-mono text-[11px] text-foreground truncate">{doc.name}</p>
-                    <p className="font-mono text-[10px] text-muted-foreground">{doc.job}</p>
+                    <p className="font-mono text-[11px] text-foreground truncate">{job.title}</p>
+                    <p className="font-mono text-[10px] text-muted-foreground truncate">{formatActivityLabel(job)}</p>
                   </div>
-                  <span className="font-mono text-[9px] px-1.5 py-0.5 rounded-full glass-surface text-muted-foreground">{doc.lang}</span>
-                  <span className="font-mono text-[10px] text-muted-foreground">{doc.date}</span>
+                  <span className="font-mono text-[10px] text-muted-foreground">{new Date(job.date_scraped).toLocaleDateString()}</span>
                 </div>
               ))}
             </div>

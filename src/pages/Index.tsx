@@ -55,6 +55,8 @@ export default function Index() {
       return res.json();
     },
     enabled: isAuthenticated,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 
   const scoreMutation = useMutation({
@@ -130,7 +132,7 @@ export default function Index() {
               <Applications jobs={jobs} onViewJob={() => setActiveSection("jobs")} />
             )}
             {activeSection === "profile" && user && (
-              <ProfilePage user={user} />
+              <ProfilePage user={user} jobs={jobs} />
             )}
             {activeSection === "templates" && (
               <TemplatesPage />

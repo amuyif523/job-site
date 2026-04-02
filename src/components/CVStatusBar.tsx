@@ -131,6 +131,8 @@ export function CVStatusBar() {
       return res.json();
     },
     enabled: true,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 
   useEffect(() => {

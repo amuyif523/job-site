@@ -147,7 +147,7 @@ export async function generateDocuments(id: number): Promise<{ cv_url: string; c
 export async function uploadCV(file: File): Promise<void> {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await apiFetch("/api/cv", { method: "POST", body: formData }, true);
+  const res = await apiFetch("/api/ai/upload_cv", { method: "POST", body: formData }, true);
   if (!res.ok) throw new Error("Failed to upload CV");
 }
 

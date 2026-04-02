@@ -9,6 +9,7 @@ interface ApplicationsProps {
 
 const columns = [
   { status: "selected", label: "SELECTED" },
+  { status: "interviewing", label: "INTERVIEWING" },
   { status: "applied", label: "APPLIED" },
   { status: "rejected", label: "REJECTED" },
 ] as const;
@@ -17,7 +18,7 @@ export function Applications({ jobs, onViewJob }: ApplicationsProps) {
   return (
     <div className="animate-fade-up">
       <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">MY APPLICATIONS</p>
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-4 gap-4">
         {columns.map(col => {
           const colJobs = jobs.filter(j => j.status === col.status);
           return (

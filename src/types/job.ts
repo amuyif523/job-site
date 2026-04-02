@@ -1,7 +1,7 @@
-export type JobStatus = "new" | "scored" | "selected" | "applied" | "rejected";
+export type JobStatus = "new" | "scored" | "selected" | "applied" | "interviewing" | "offered" | "rejected";
 
 export interface JobEvent {
-  type: "scraped" | "scored" | "selected" | "applied" | "rejected";
+  type: "scraped" | "scored" | "selected" | "applied" | "interviewing" | "offered" | "rejected";
   timestamp: string;
   score?: number;
 }

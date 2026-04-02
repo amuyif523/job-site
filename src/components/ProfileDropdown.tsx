@@ -16,9 +16,10 @@ interface ProfileDropdownProps {
   onNavigate: (s: Section) => void;
   onOpenSettings: () => void;
   onLogout: () => void;
+  isLoggingOut?: boolean;
 }
 
-export function ProfileDropdown({ user, onNavigate, onOpenSettings, onLogout }: ProfileDropdownProps) {
+export function ProfileDropdown({ user, onNavigate, onOpenSettings, onLogout, isLoggingOut = false }: ProfileDropdownProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -72,9 +73,16 @@ export function ProfileDropdown({ user, onNavigate, onOpenSettings, onLogout }: 
           ))}
 
           <div className="border-t border-border/30 pt-1 mt-1">
-            <button onClick={() => { onLogout(); setOpen(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 rounded font-display text-[13px] text-jarvis-crimson hover:bg-jarvis-crimson/10 transition-colors">
+            <button
+              onClick={() => {
+                onLogout();
+                setOpen(false);
+              }}
+              disabled={isLoggingOut}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded font-display text-[13px] text-jarvis-crimson transition-colors hover:bg-jarvis-crimson/10 disabled:cursor-not-allowed disabled:opacity-60"
+            >
               <LogOut className="h-4 w-4" />
-              Sign Out
+              {isLoggingOut ? "Signing Out..." : "Sign Out"}
             </button>
           </div>
         </div>

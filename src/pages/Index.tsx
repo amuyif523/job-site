@@ -27,7 +27,7 @@ export default function Index() {
   const [generateJob, setGenerateJob] = useState<Job | null>(null);
   const [scoreTaskId, setScoreTaskId] = useState<string | null>(null);
   const completionToastShownRef = useRef(false);
-  const { isAuthenticated, isAuthLoading, user, setAuthenticatedUser, logout } = useAuth();
+  const { isAuthenticated, isAuthLoading, authError, user, isLoggingOut, setAuthenticatedUser, retryAuth, logout } = useAuth();
   const queryClient = useQueryClient();
 
   const { data: jobsData, isLoading: isJobsLoading, isFetching: isJobsFetching } = useQuery({
@@ -130,15 +130,27 @@ export default function Index() {
     setAuthenticatedUser(userData);
   };
 
-  const handleLogout = () => {
-    logout();
-    setActiveSection("dashboard");
+  const handleLogout = async () => {
+    try {
+      await logout();
+      setActiveSection("dashboard");
+    } catch (error) {
+      toast({
+        title: "Sign out failed",
+        description: error instanceof Error ? error.message : "We couldn't sign you out right now. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
     <ProtectedRoute
       isAuthenticated={isAuthenticated}
       isLoading={isAuthLoading}
+      authError={authError}
+      onRetry={() => {
+        void retryAuth();
+      }}
       fallback={<LandingPage onLogin={handleLogin} />}
     >
     <div className="relative min-h-screen" style={{ background: "#07070F" }}>
@@ -162,7 +174,10 @@ export default function Index() {
             user={user}
             onNavigate={setActiveSection}
             onOpenSettings={() => setSettingsOpen(true)}
-            onLogout={handleLogout}
+            onLogout={() => {
+              void handleLogout();
+            }}
+            isLoggingOut={isLoggingOut}
           />
         )}
       </div>

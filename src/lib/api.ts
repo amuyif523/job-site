@@ -133,15 +133,15 @@ export async function apiRegister(
 }
 
 export async function apiLogout(): Promise<void> {
-  await fetch(`${API_BASE}/auth/logout`, {
+  const res = await apiFetch("/auth/logout", {
     method: "POST",
-    credentials: "include",
   });
+  if (!res.ok) await throwApiError(res, "Failed to sign out");
 }
 
 export async function apiGetMe(): Promise<UserData> {
   const res = await apiFetch("/auth/me");
-  if (!res.ok) throw new Error("Not authenticated");
+  if (!res.ok) await throwApiError(res, "Failed to restore session");
   return res.json();
 }
 

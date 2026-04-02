@@ -26,6 +26,7 @@ vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
     isAuthenticated: true,
     isAuthLoading: false,
+    authError: null,
     user: {
       id: 1,
       name: "Test User",
@@ -33,7 +34,9 @@ vi.mock("@/contexts/AuthContext", () => ({
       target_role: "Engineer",
       plan: "free",
     },
+    isLoggingOut: false,
     setAuthenticatedUser: vi.fn(),
+    retryAuth: vi.fn(),
     logout: vi.fn(),
   }),
 }));

@@ -3,6 +3,7 @@ import { LayoutDashboard, Briefcase, CheckSquare, Settings, ChevronLeft, Play, L
 import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
+import { fetchScrapeStatus, runScraper } from "@/lib/api";
 
 export type Section = "dashboard" | "jobs" | "applications" | "profile" | "templates" | "leaderboard";
 export const SIDEBAR_EXPANDED_WIDTH = 200;
@@ -69,10 +70,7 @@ export function Sidebar({ active, collapsed, onNavigate, onOpenSettings, onColla
     if (!scraping || !scrapeTaskId) return;
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`http://localhost:8000/api/scrape/status?task_id=${encodeURIComponent(scrapeTaskId)}`, {
-          credentials: "include",
-        });
-        const data = await res.json();
+        const data = await fetchScrapeStatus(scrapeTaskId);
 
         if (data.status === "SUCCESS") {
           const count = data.result?.saved ?? 0;
@@ -97,11 +95,7 @@ export function Sidebar({ active, collapsed, onNavigate, onOpenSettings, onColla
     if (!canScrape() || scraping) return;
 
     try {
-      const res = await fetch("http://localhost:8000/api/scrape", {
-        method: "POST",
-        credentials: "include",
-      });
-      const data = await res.json();
+      const data = await runScraper();
 
       if ((data.status === "queued" || data.status === "started") && data.task_id) {
         setScraping(true);
@@ -110,8 +104,12 @@ export function Sidebar({ active, collapsed, onNavigate, onOpenSettings, onColla
         setCooldown(true);
         toast({ title: "🔍 Scraping jobs...", description: "Task queued in worker" });
       }
-    } catch {
-      toast({ title: "Failed to start scraper", variant: "destructive" });
+    } catch (error) {
+      toast({
+        title: "Failed to start scraper",
+        description: error instanceof Error ? error.message : "The scraper could not be queued.",
+        variant: "destructive",
+      });
     }
   };
 

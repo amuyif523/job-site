@@ -1,6 +1,6 @@
 import { Job, JobStatus } from "@/types/job.ts";
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_BASE?.trim() || "";
 
 export class ApiError extends Error {
   status: number;
@@ -177,6 +177,12 @@ export async function updateJobNotes(id: number, notes: string): Promise<void> {
 export async function runScraper(): Promise<TaskQueuedResponse> {
   const res = await apiFetch("/api/scrape", { method: "POST" });
   if (!res.ok) await throwApiError(res, "Failed to run scraper");
+  return res.json();
+}
+
+export async function fetchScrapeStatus(taskId: string): Promise<TaskStatusResponse> {
+  const res = await apiFetch(`/api/scrape/status?task_id=${encodeURIComponent(taskId)}`);
+  if (!res.ok) await throwApiError(res, "Failed to fetch scraper task status");
   return res.json();
 }
 

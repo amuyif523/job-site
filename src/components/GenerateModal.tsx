@@ -74,12 +74,12 @@ export function GenerateModal({ job, open, onClose }: GenerateModalProps) {
 
   return (
     <div
-      className="fixed inset-0 flex items-center justify-center"
+      className="fixed inset-0 flex items-start justify-center px-3 py-4 sm:items-center sm:px-6"
       style={{ zIndex: 100, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)" }}
       onClick={handleClose}
     >
-      <div onClick={e => e.stopPropagation()} className="w-[640px] max-h-[85vh] overflow-y-auto animate-fade-up">
-        <GlassCard className="p-6" hover={false}>
+      <div onClick={e => e.stopPropagation()} className="w-full max-w-[640px] max-h-[calc(100vh-2rem)] overflow-y-auto animate-fade-up sm:max-h-[85vh]">
+        <GlassCard className="p-4 sm:p-6" hover={false}>
           {/* Header */}
           <div className="flex justify-between items-start mb-4">
             <div>
@@ -195,7 +195,7 @@ export function GenerateModal({ job, open, onClose }: GenerateModalProps) {
 
               {/* Toggle cards */}
               <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">WHAT TO GENERATE</p>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <button onClick={() => setGenCV(!genCV)} className={cn("glass-surface p-4 rounded-lg flex items-center gap-3 transition-all", genCV && "shadow-[0_0_20px_rgba(139,92,246,0.35)] border-jarvis-purple/40")}>
                   <FileText className={cn("h-5 w-5", genCV ? "text-jarvis-purple" : "text-muted-foreground")} />
                   <span className="font-display text-sm font-medium">{genCV ? "✓ " : ""}Tailored CV</span>
@@ -220,7 +220,7 @@ export function GenerateModal({ job, open, onClose }: GenerateModalProps) {
               <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">SPECIAL INSTRUCTIONS (OPTIONAL)</p>
               <textarea value={instructions} onChange={e => setInstructions(e.target.value)} placeholder="e.g. Emphasize Python skills, keep CV to 1 page, formal tone..." className="w-full h-[90px] bg-transparent glass-surface p-3 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:shadow-[0_0_0_2px_rgba(139,92,246,0.5)] resize-none rounded-lg" />
 
-              <div className="flex gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row">
                 <button onClick={() => setStep(1)} className="px-4 py-3 rounded-md font-display font-medium text-[13px] uppercase glass-surface text-muted-foreground hover:text-foreground transition-all">
                   ← BACK
                 </button>
@@ -248,7 +248,7 @@ export function GenerateModal({ job, open, onClose }: GenerateModalProps) {
                 <p className="font-display font-bold text-lg text-foreground">Documents Ready!</p>
                 <p className="font-mono text-[11px] text-muted-foreground mt-1">Your application documents have been generated</p>
               </div>
-              <div className="flex gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row">
                 {result.cv_url && (
                   <a href={result.cv_url} target="_blank" rel="noopener noreferrer" className="flex-1 glass-surface p-3 rounded-lg flex items-center gap-2 font-mono text-xs text-foreground hover:shadow-[0_0_12px_rgba(139,92,246,0.3)] transition-all">
                     <Download className="h-4 w-4 text-jarvis-purple" /> Download CV

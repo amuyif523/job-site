@@ -200,15 +200,19 @@ export function CVStatusBar() {
   }[cvState];
 
   return (
-    <div className="relative" ref={panelRef}>
-      <div className="glass-surface px-3 py-2 flex items-center gap-2 font-mono text-[11px]">
+    <div className="relative max-w-full" ref={panelRef}>
+      <div className="glass-surface flex max-w-full flex-wrap items-center gap-2 px-3 py-2 font-mono text-[11px]">
         {cvState !== "no_cv" ? (
           <>
             <div className={`h-2 w-2 rounded-full ${stateDotClass}`} />
-            <span className="text-muted-foreground max-w-[120px] truncate">{displayName}</span>
+            <span className="max-w-[140px] truncate text-muted-foreground sm:max-w-[180px]">{displayName}</span>
             <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{stateLabel}</span>
             {cvState === "ready" && score !== null && (
-              <button onClick={() => setPanelOpen((v) => !v)} className="transition-transform hover:scale-110">
+              <button
+                onClick={() => setPanelOpen((v) => !v)}
+                className="transition-transform hover:scale-110"
+                aria-label={panelOpen ? "Hide CV strength details" : "Show CV strength details"}
+              >
                 <MiniScoreRing score={score} />
               </button>
             )}
@@ -239,7 +243,7 @@ export function CVStatusBar() {
       {/* Strength breakdown panel */}
       {panelOpen && cvData && cvState === "ready" && score !== null && (
         <div
-          className="absolute top-full right-0 mt-2 w-[260px] glass-surface rounded-xl p-3 font-mono text-[11px]"
+          className="absolute top-full right-0 mt-2 w-[min(20rem,calc(100vw-1.5rem))] max-w-[calc(100vw-1.5rem)] glass-surface rounded-xl p-3 font-mono text-[11px] sm:w-[260px]"
           style={{ zIndex: 60 }}
         >
           <div className="flex items-center justify-between mb-2">

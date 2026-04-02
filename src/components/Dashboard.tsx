@@ -228,12 +228,12 @@ export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
 
   return (
     <div className="animate-fade-up space-y-6">
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-4">
         {kpis.map(k => (
-          <GlassCard key={k.label} className="p-5 relative overflow-hidden">
+          <GlassCard key={k.label} className="relative overflow-hidden p-4 sm:p-5">
             <div className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: "linear-gradient(to bottom, #8B5CF6, #E11D48)" }} />
             <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">{k.label}</p>
-            <p className="font-display font-bold text-[40px] text-foreground mt-1 leading-none">
+            <p className="mt-1 font-display text-[34px] font-bold leading-none text-foreground sm:text-[40px]">
               <AnimatedCounter value={k.value} />
             </p>
             <div className="mt-3 h-px w-full" style={{ background: "linear-gradient(to right, #8B5CF6, #3B82F6)", animation: "pulse-line 2.5s ease-in-out infinite" }} />
@@ -245,17 +245,17 @@ export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
       {dashboardView === "ready_with_jobs" ? (
         <div>
           <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-3">TOP MATCHES</p>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3">
             {topMatches.map(job => (
-              <GlassCard key={job.id} className="p-5 flex flex-col">
-                <div className="flex justify-between items-start">
+              <GlassCard key={job.id} className="flex h-full flex-col p-4 sm:p-5">
+                <div className="flex items-start justify-between gap-3">
                   <div className="h-11 w-11 rounded-full flex items-center justify-center font-mono font-bold text-sm text-foreground shrink-0" style={{ background: "linear-gradient(135deg, #8B5CF6, #3B82F6)" }}>
                     {job.company.slice(0, 2).toUpperCase()}
                   </div>
                   <ScoreRing score={job.score} size={72} />
                 </div>
                 <p className="font-display font-semibold text-sm text-foreground mt-3 line-clamp-2">{job.title}</p>
-                <p className="font-mono text-[11px] text-muted-foreground mt-1">{job.company} · {job.location}</p>
+                <p className="mt-1 break-words font-mono text-[11px] text-muted-foreground">{job.company} · {job.location}</p>
                 <span className="mt-2 inline-block font-mono text-[10px] px-2 py-0.5 rounded-full" style={{ color: statusColor(job.status), background: statusColor(job.status) + "26" }}>
                   {job.status}
                 </span>
@@ -275,18 +275,20 @@ export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
       )}
 
       {/* Score Distribution — always show */}
-      <GlassCard className="p-5" hover={false}>
+      <GlassCard className="overflow-hidden p-4 sm:p-5" hover={false}>
         <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-4">SCORE DISTRIBUTION</p>
-        <ResponsiveContainer width="100%" height={160}>
-          <BarChart data={dist}>
-            <XAxis dataKey="range" tick={{ fill: "#6B7280", fontSize: 11, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: "#6B7280", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} />
-            <Tooltip contentStyle={{ background: "rgba(13,13,26,0.9)", border: "1px solid rgba(139,92,246,0.2)", borderRadius: 8, fontFamily: "JetBrains Mono", fontSize: 11, color: "#F1F0FF" }} />
-            <Bar dataKey="count" radius={[4, 4, 0, 0]} animationDuration={1000}>
-              {dist.map((d, i) => <Cell key={i} fill={d.color} />)}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+        <div className="h-[220px] w-full min-w-0 sm:h-[180px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={dist} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+              <XAxis dataKey="range" tick={{ fill: "#6B7280", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} interval={0} />
+              <YAxis tick={{ fill: "#6B7280", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} width={28} />
+              <Tooltip contentStyle={{ background: "rgba(13,13,26,0.9)", border: "1px solid rgba(139,92,246,0.2)", borderRadius: 8, fontFamily: "JetBrains Mono", fontSize: 11, color: "#F1F0FF" }} />
+              <Bar dataKey="count" radius={[4, 4, 0, 0]} animationDuration={1000}>
+                {dist.map((d, i) => <Cell key={i} fill={d.color} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       </GlassCard>
     </div>
   );

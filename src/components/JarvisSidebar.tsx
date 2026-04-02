@@ -5,11 +5,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
 
 export type Section = "dashboard" | "jobs" | "applications" | "profile" | "templates" | "leaderboard";
+export const SIDEBAR_EXPANDED_WIDTH = 200;
+export const SIDEBAR_COLLAPSED_WIDTH = 52;
 
 interface SidebarProps {
   active: Section;
+  collapsed: boolean;
   onNavigate: (s: Section) => void;
   onOpenSettings: () => void;
+  onCollapsedChange: (collapsed: boolean) => void;
 }
 
 const navItems: { id: Section; label: string; icon: React.ElementType }[] = [
@@ -43,8 +47,7 @@ function timeUntilNextScrape(): string {
   return `${h}h ${m}m`;
 }
 
-export function Sidebar({ active, onNavigate, onOpenSettings }: SidebarProps) {
-  const [collapsed, setCollapsed]   = useState(false);
+export function Sidebar({ active, collapsed, onNavigate, onOpenSettings, onCollapsedChange }: SidebarProps) {
   const [scraping, setScraping]     = useState(false);
   const [scrapeTaskId, setScrapeTaskId] = useState<string | null>(null);
   const [cooldown, setCooldown]     = useState(!canScrape());
@@ -118,7 +121,7 @@ export function Sidebar({ active, onNavigate, onOpenSettings }: SidebarProps) {
     <aside
       className="fixed left-0 top-0 h-screen flex flex-col transition-all duration-250 ease-in-out"
       style={{
-        width: collapsed ? 52 : 200,
+        width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH,
         zIndex: 10,
         background: "#090912",
         borderRight: "1px solid rgba(139,92,246,0.12)",
@@ -131,7 +134,11 @@ export function Sidebar({ active, onNavigate, onOpenSettings }: SidebarProps) {
         ) : (
           <span className="text-gradient-purple font-display font-bold text-[17px] mx-auto">J</span>
         )}
-        <button onClick={() => setCollapsed(!collapsed)} className="text-muted-foreground hover:text-foreground transition-colors">
+        <button
+          onClick={() => onCollapsedChange(!collapsed)}
+          className="text-muted-foreground hover:text-foreground transition-colors"
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
           <ChevronLeft className={cn("h-4 w-4 transition-transform duration-200", collapsed && "rotate-180")} />
         </button>
       </div>

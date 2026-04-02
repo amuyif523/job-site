@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchJobs, fetchLatestCV, fetchScoreAllStatus, scoreAll, type CVLatestResponse } from "@/lib/api";
 import { Job } from "@/types/job";
 import { ParticleBackground } from "@/components/ParticleBackground";
-import { Sidebar, Section } from "@/components/JarvisSidebar";
+import { SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_EXPANDED_WIDTH, Sidebar, Section } from "@/components/JarvisSidebar";
 import { CVStatusBar } from "@/components/CVStatusBar";
 import { Dashboard } from "@/components/Dashboard";
 import { JobFeed } from "@/components/JobFeed";
@@ -22,6 +22,7 @@ import { toast } from "@/hooks/use-toast";
 
 export default function Index() {
   const [activeSection, setActiveSection] = useState<Section>("dashboard");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [generateJob, setGenerateJob] = useState<Job | null>(null);
   const [scoreTaskId, setScoreTaskId] = useState<string | null>(null);
@@ -29,13 +30,13 @@ export default function Index() {
   const { isAuthenticated, isAuthLoading, user, setAuthenticatedUser, logout } = useAuth();
   const queryClient = useQueryClient();
 
-  const { data: jobs = [], isLoading } = useQuery({
+  const { data: jobsData, isLoading: isJobsLoading, isFetching: isJobsFetching } = useQuery({
     queryKey: ["jobs"],
     queryFn: fetchJobs,
     enabled: isAuthenticated,
   });
 
-  const { data: cvData, isLoading: isCvLoading } = useQuery<CVLatestResponse>({
+  const { data: cvData, isLoading: isCvLoading, isFetching: isCvFetching } = useQuery<CVLatestResponse>({
     queryKey: ["latestCV"],
     queryFn: fetchLatestCV,
     enabled: isAuthenticated,
@@ -43,7 +44,9 @@ export default function Index() {
     refetchOnWindowFocus: true,
   });
 
-  const isGlobalLoading = isLoading || isCvLoading;
+  const jobs = jobsData ?? [];
+  const isInitialLoading = (isJobsLoading && !jobsData) || (isCvLoading && !cvData);
+  const isRefreshing = !isInitialLoading && (isJobsFetching || isCvFetching);
 
   const scoreMutation = useMutation({
     mutationFn: scoreAll,
@@ -107,6 +110,21 @@ export default function Index() {
 
   const isScoringQueued = !!scoreTaskId;
   const isScoring = scoreMutation.isPending || isScoringQueued;
+  const sidebarWidth = sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const syncSidebarForViewport = () => {
+      if (window.innerWidth < 1024) {
+        setSidebarCollapsed(true);
+      }
+    };
+
+    syncSidebarForViewport();
+    window.addEventListener("resize", syncSidebarForViewport);
+    return () => window.removeEventListener("resize", syncSidebarForViewport);
+  }, []);
 
   const handleLogin = (userData: UserData) => {
     setAuthenticatedUser(userData);
@@ -125,10 +143,19 @@ export default function Index() {
     >
     <div className="relative min-h-screen" style={{ background: "#07070F" }}>
       <ParticleBackground />
-      <Sidebar active={activeSection} onNavigate={setActiveSection} onOpenSettings={() => setSettingsOpen(true)} />
+      <Sidebar
+        active={activeSection}
+        collapsed={sidebarCollapsed}
+        onCollapsedChange={setSidebarCollapsed}
+        onNavigate={setActiveSection}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
 
       {/* Top-right: CV status + Profile */}
-      <div className="fixed top-4 right-6 flex items-center gap-3" style={{ zIndex: 30 }}>
+      <div
+        className="fixed top-3 right-3 flex flex-wrap items-center justify-end gap-2 sm:top-4 sm:right-6 sm:gap-3"
+        style={{ left: sidebarWidth + 16, zIndex: 30 }}
+      >
         <CVStatusBar />
         {user && (
           <ProfileDropdown
@@ -141,13 +168,21 @@ export default function Index() {
       </div>
 
       <main
-        className="relative transition-all duration-250 ease-in-out pt-4 px-6 pb-6"
-        style={{ marginLeft: 200, zIndex: 1 }}
+        className="relative min-w-0 pb-6 pr-3 pt-24 transition-all duration-250 ease-in-out sm:pr-6 sm:pt-20"
+        style={{ paddingLeft: sidebarWidth + 16, zIndex: 1 }}
       >
-        {/* Spacer for top bar */}
-        <div className="h-10" />
+        <div
+          className="absolute left-0 right-0 top-0 h-0.5 overflow-hidden rounded-full bg-transparent"
+          aria-hidden="true"
+        >
+          <div
+            className={`h-full w-full bg-gradient-to-r from-jarvis-purple via-jarvis-blue to-jarvis-green transition-opacity duration-200 ${
+              isRefreshing ? "opacity-100 animate-pulse" : "opacity-0"
+            }`}
+          />
+        </div>
 
-        {isGlobalLoading ? (
+        {isInitialLoading ? (
           <div className="flex items-center justify-center h-[60vh]">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-jarvis-purple border-t-transparent" />
           </div>

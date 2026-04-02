@@ -23,12 +23,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
   return (
     <div
-      className="fixed inset-0 flex items-center justify-center"
+      className="fixed inset-0 flex items-start justify-center px-3 py-4 sm:items-center sm:px-6"
       style={{ zIndex: 100, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)" }}
       onClick={onClose}
     >
-      <div onClick={e => e.stopPropagation()} className="w-[480px] animate-fade-up">
-        <GlassCard className="p-6" hover={false}>
+      <div onClick={e => e.stopPropagation()} className="w-full max-w-[480px] animate-fade-up">
+        <GlassCard className="p-4 sm:p-6" hover={false}>
           <div className="flex justify-between items-center mb-5">
             <h2 className="text-gradient-purple font-display font-bold text-lg">Settings</h2>
             <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-5 w-5" /></button>

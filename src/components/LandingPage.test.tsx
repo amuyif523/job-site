@@ -127,4 +127,16 @@ describe("LandingPage auth UX", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Invalid credentials");
   });
+
+  it("renders provider buttons as disabled coming-soon actions instead of clickable auth flows", () => {
+    renderLandingPage();
+
+    expect(screen.getByRole("button", { name: "Google sign-in coming soon" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "LinkedIn sign-in coming soon" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Apple sign-in coming soon" })).toBeDisabled();
+    expect(screen.getAllByText("Coming soon")).toHaveLength(3);
+    expect(
+      screen.getByText("Google, LinkedIn, and Apple sign-in are not available yet. Use email and password for now.")
+    ).toBeInTheDocument();
+  });
 });

@@ -45,6 +45,12 @@ const PASSWORD_RULES = [
   "One number",
 ];
 
+const AUTH_PROVIDERS = [
+  { name: "Google", status: "Coming soon" },
+  { name: "LinkedIn", status: "Coming soon" },
+  { name: "Apple", status: "Coming soon" },
+] as const;
+
 function getPasswordValidationMessage(password: string): string | null {
   if (!password) return "Password is required.";
   if (password.length < 10) return "Password must be at least 10 characters.";
@@ -81,7 +87,6 @@ export function LandingPage({ onLogin }: LandingPageProps) {
   const [signInValues, setSignInValues] = useState<SignInState>(EMPTY_SIGN_IN);
   const [signUpValues, setSignUpValues] = useState<SignUpState>(EMPTY_SIGN_UP);
   const [error, setError] = useState("");
-  const [infoMessage, setInfoMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
   const currentValidationMessage = useMemo(
@@ -94,7 +99,6 @@ export function LandingPage({ onLogin }: LandingPageProps) {
     setError("");
 
     if (nextTab === "signin") {
-      setInfoMessage("");
       setShowSignUpPassword(false);
       setShowConfirmPassword(false);
       setSignUpValues(EMPTY_SIGN_UP);
@@ -137,11 +141,6 @@ export function LandingPage({ onLogin }: LandingPageProps) {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleProviderClick = (provider: string) => {
-    handleTabChange("signup");
-    setInfoMessage(`${provider} OAuth coming soon. You can create an account below in the meantime.`);
   };
 
   const features = [
@@ -387,12 +386,6 @@ export function LandingPage({ onLogin }: LandingPageProps) {
                 </>
               )}
 
-              {infoMessage && (
-                <p className="font-mono text-[11px] text-sky-300 bg-sky-400/10 border border-sky-400/20 px-3 py-2 rounded">
-                  {infoMessage}
-                </p>
-              )}
-
               {error && (
                 <p className="font-mono text-[11px] text-red-400 bg-red-400/10 border border-red-400/20 px-3 py-2 rounded" role="alert">
                   {error}
@@ -416,22 +409,30 @@ export function LandingPage({ onLogin }: LandingPageProps) {
 
               <div className="flex items-center gap-3 my-2">
                 <div className="flex-1 h-px bg-border/50" />
-                <span className="font-mono text-[10px] text-muted-foreground">or continue with</span>
+                <span className="font-mono text-[10px] text-muted-foreground">social sign-in</span>
                 <div className="flex-1 h-px bg-border/50" />
               </div>
 
               <div className="grid grid-cols-3 gap-2">
-                {["Google", "LinkedIn", "Apple"].map((provider) => (
+                {AUTH_PROVIDERS.map((provider) => (
                   <button
-                    key={provider}
+                    key={provider.name}
                     type="button"
-                    onClick={() => handleProviderClick(provider)}
-                    className="glass-surface py-2.5 rounded-md font-display text-[12px] text-foreground hover:bg-foreground/[0.05] transition-all"
+                    disabled
+                    aria-label={`${provider.name} sign-in coming soon`}
+                    className="glass-surface flex flex-col items-center justify-center gap-1 py-2.5 rounded-md font-display text-[12px] text-foreground/70 transition-all opacity-70 cursor-not-allowed"
                   >
-                    {provider}
+                    <span>{provider.name}</span>
+                    <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground">
+                      {provider.status}
+                    </span>
                   </button>
                 ))}
               </div>
+
+              <p className="font-mono text-[10px] leading-5 text-muted-foreground">
+                Google, LinkedIn, and Apple sign-in are not available yet. Use email and password for now.
+              </p>
 
               {tab === "signin" && (
                 <div className="text-right mt-1">

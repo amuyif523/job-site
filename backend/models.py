@@ -17,6 +17,7 @@ class User(SQLModel, table=True):
     name: str
     email: str = Field(sa_column=Column(String, unique=True, index=True, nullable=False))
     hashed_pw: str
+    token_version: int = Field(default=0)
     target_role: str = Field(default="")
     plan: str = Field(default="free")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

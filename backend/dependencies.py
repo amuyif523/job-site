@@ -26,6 +26,10 @@ def get_current_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
+    token_version = int(payload.get("ver", 0))
+    if token_version != int(user.token_version or 0):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+
     return UserPublic(
         id=int(user.id),
         name=user.name,

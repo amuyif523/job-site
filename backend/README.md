@@ -45,34 +45,37 @@ API docs at http://localhost:8000/docs
 
 ---
 
-## Dev shortcut (delete before production)
-
-**Ctrl+Shift+L** on the login page → instantly logs in as:
-- Email: `dev@jarvis.local`
-- Password: `devpass123`
-
-The dev user is auto-created when the database initialises.
-
-A yellow badge in the top-right corner reminds you it's active.
-
----
-
 ## API endpoints
 
 | Method | Endpoint         | Body                                              |
 |--------|-----------------|---------------------------------------------------|
 | POST   | /auth/register  | name, email, password, confirm_password, target_role |
 | POST   | /auth/login     | email, password                                   |
-| GET    | /auth/me        | — (Bearer token required)                        |
+| POST   | /auth/logout    | —                                                |
+| GET    | /auth/me        | — (cookie auth)                                  |
 
-All protected routes expect: `Authorization: Bearer <token>`
+All protected routes expect the `access_token` HttpOnly cookie set by login/register/reset-password.
+
+## Auth security notes
+
+- Login and signup are rate-limited in-memory per IP/identifier.
+- Logout invalidates the current JWT server-side by rotating the user's `token_version`.
+- Password reset also rotates `token_version`, which expires older sessions.
+
+## Cookie configuration
+
+- `JWT_SECRET`: required in every environment.
+- `COOKIE_SECURE`: optional. If omitted, secure cookies are enabled automatically when `FRONTEND_URL` is `https://...`.
+- `COOKIE_SAMESITE`: optional. Allowed values: `lax`, `strict`, `none`.
+- `FRONTEND_URL`: optional but recommended so local/dev/prod cookie behavior matches the deployed frontend.
+
+If `COOKIE_SAMESITE=none` is set while secure cookies are disabled, the backend falls back to `lax` for safety.
 
 ---
 
 ## Before going to production
 
-- [ ] Delete the dev user block in `database.py`
-- [ ] Delete the `useEffect` Ctrl+Shift+L block in `LandingPage.tsx`
-- [ ] Delete the yellow DEV badge div in `LandingPage.tsx`
 - [ ] Set a real `JWT_SECRET` environment variable
+- [ ] Set `COOKIE_SECURE=true` behind HTTPS if you are not relying on `FRONTEND_URL` auto-detection
+- [ ] Confirm `COOKIE_SAMESITE` matches your deployed frontend/backend topology
 - [ ] Switch from SQLite to PostgreSQL

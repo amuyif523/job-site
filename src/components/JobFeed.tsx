@@ -13,6 +13,7 @@ interface JobFeedProps {
   onGenerateForJob: (job: Job) => void;
   onScoreAll?: () => void;
   isScoring?: boolean;
+  scoreButtonLabel?: string;
 }
 
 const statusColors: Record<string, string> = {
@@ -27,7 +28,7 @@ const scoreLabelColors: Record<string, string> = {
   Unscorable: "#6B7280",
 };
 
-export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring }: JobFeedProps) {
+export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreButtonLabel }: JobFeedProps) {
   const [search, setSearch] = useState("");
   const [scoreMin, setScoreMin] = useState(0);
   const [statusFilter, setStatusFilter] = useState("all");
@@ -113,7 +114,7 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring }: JobFe
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md font-display text-[11px] font-medium uppercase border border-jarvis-purple/40 text-jarvis-purple hover:bg-jarvis-purple hover:text-foreground transition-all"
             >
               {isScoring ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-              {isScoring ? "Scoring..." : "Score All"}
+              {scoreButtonLabel || (isScoring ? "Scoring..." : "Score All")}
             </button>
           )}
         </div>

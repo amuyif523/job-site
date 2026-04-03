@@ -107,12 +107,29 @@ export interface ScrapeTaskResult {
 
 export interface ScoreTaskResult {
   scored?: number;
+  unscorable?: number;
+  results?: Array<{
+    job_id: number;
+    compatibility_score: number;
+    match_status: string;
+    reasoning: string;
+  }>;
   errors?: string[];
+  progress?: ScoreTaskProgress;
+}
+
+export interface ScoreTaskProgress {
+  phase: "queued" | "running" | "completed" | "failed";
+  total_jobs: number;
+  jobs_scored: number;
+  jobs_failed: number;
+  jobs_unscorable: number;
 }
 
 export interface TaskStatusResponse {
   task_id: string;
-  status: string;
+  status: "queued" | "running" | "retrying" | "success" | "failure";
+  progress?: ScoreTaskProgress | null;
   result?: ScoreTaskResult;
   error?: string | null;
 }

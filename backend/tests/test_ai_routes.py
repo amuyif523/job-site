@@ -71,6 +71,8 @@ class AIRouteTests(unittest.TestCase):
         main.app.dependency_overrides.clear()
         self.client.close()
         self.temp_upload_dir.cleanup()
+        ai_router.ACTIVE_SCORE_TASKS.clear()
+        ai_router.SCORE_TASK_OWNERS.clear()
 
     def upload_file(self, name: str, content: bytes, content_type: str = "application/pdf"):
         return self.client.post(
@@ -341,6 +343,98 @@ class AIRouteTests(unittest.TestCase):
 
         self.assertEqual(exc_info.exception.status_code, 503)
         self.assertEqual(exc_info.exception.detail, "Missing backend model provider key.")
+
+    def test_score_all_rejects_duplicate_active_task(self) -> None:
+        ai_router.ACTIVE_SCORE_TASKS[self.current_user.id] = "score-task-active"
+        ai_router.SCORE_TASK_OWNERS["score-task-active"] = self.current_user.id
+
+        class RunningResult:
+            status = "PROGRESS"
+
+        with (
+            patch.object(ai_router.llm_service, "get_scoring_provider_name", return_value="gemini"),
+            patch.object(ai_router.celery_app, "AsyncResult", return_value=RunningResult()),
+            self.assertRaises(ai_router.HTTPException) as exc_info,
+        ):
+            ai_router.score_all(body=ai_router.ScoreRequest(), current_user=self.current_user)
+
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertIn("already running", exc_info.exception.detail)
+
+    def test_score_all_replaces_stale_terminal_task(self) -> None:
+        ai_router.ACTIVE_SCORE_TASKS[self.current_user.id] = "score-task-done"
+        ai_router.SCORE_TASK_OWNERS["score-task-done"] = self.current_user.id
+
+        class SuccessResult:
+            status = "SUCCESS"
+
+        class QueuedTask:
+            id = "score-task-new"
+
+        with (
+            patch.object(ai_router.llm_service, "get_scoring_provider_name", return_value="gemini"),
+            patch.object(ai_router.celery_app, "AsyncResult", return_value=SuccessResult()),
+            patch.object(ai_router.score_jobs_task, "delay", return_value=QueuedTask()),
+        ):
+            response = ai_router.score_all(body=ai_router.ScoreRequest(), current_user=self.current_user)
+
+        self.assertEqual(response.task_id, "score-task-new")
+        self.assertEqual(ai_router.ACTIVE_SCORE_TASKS[self.current_user.id], "score-task-new")
+        self.assertEqual(ai_router.SCORE_TASK_OWNERS["score-task-new"], self.current_user.id)
+        self.assertNotIn("score-task-done", ai_router.SCORE_TASK_OWNERS)
+
+    def test_score_all_status_rejects_foreign_task_id(self) -> None:
+        ai_router.SCORE_TASK_OWNERS["other-users-task"] = 999
+
+        with self.assertRaises(ai_router.HTTPException) as exc_info:
+            ai_router.score_all_status(task_id="other-users-task", current_user=self.current_user)
+
+        self.assertEqual(exc_info.exception.status_code, 404)
+        self.assertEqual(exc_info.exception.detail, "Scoring task not found")
+
+    def test_score_all_status_normalizes_running_state(self) -> None:
+        ai_router.SCORE_TASK_OWNERS["score-task-1"] = self.current_user.id
+
+        class RunningResult:
+            status = "PROGRESS"
+            info = {
+                "phase": "running",
+                "total_jobs": 4,
+                "jobs_scored": 2,
+                "jobs_failed": 1,
+                "jobs_unscorable": 0,
+            }
+
+            def successful(self) -> bool:
+                return False
+
+            def failed(self) -> bool:
+                return False
+
+        with patch.object(ai_router.celery_app, "AsyncResult", return_value=RunningResult()):
+            response = ai_router.score_all_status(task_id="score-task-1", current_user=self.current_user)
+
+        self.assertEqual(response.status, "running")
+        assert response.progress is not None
+        self.assertEqual(response.progress["jobs_scored"], 2)
+        self.assertEqual(response.progress["total_jobs"], 4)
+
+    def test_score_all_status_returns_safe_failure_when_payload_is_corrupted(self) -> None:
+        ai_router.SCORE_TASK_OWNERS["score-task-bad"] = self.current_user.id
+        ai_router.ACTIVE_SCORE_TASKS[self.current_user.id] = "score-task-bad"
+
+        class CorruptedResult:
+            @property
+            def status(self) -> str:
+                raise ValueError("Exception information must include the exception type")
+
+        with patch.object(ai_router.celery_app, "AsyncResult", return_value=CorruptedResult()):
+            response = ai_router.score_all_status(task_id="score-task-bad", current_user=self.current_user)
+
+        self.assertEqual(response.status, "failure")
+        assert response.error is not None
+        self.assertIn("could not be decoded", response.error)
+        self.assertNotIn(self.current_user.id, ai_router.ACTIVE_SCORE_TASKS)
 
 
 if __name__ == "__main__":

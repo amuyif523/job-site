@@ -5,12 +5,16 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
+from typing import Any
 from typing import List
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, UploadFile, status
+from kombu.exceptions import OperationalError
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 from sqlmodel import Session, select
@@ -29,6 +33,10 @@ UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
 ALLOWED_CV_EXTENSIONS = {".pdf"}
 ALLOWED_CV_MIME_TYPES = {"application/pdf"}
 MAX_CV_UPLOAD_BYTES = 5 * 1024 * 1024
+TERMINAL_SCORE_STATUSES = {"SUCCESS", "FAILURE", "REVOKED"}
+ACTIVE_SCORE_TASKS: dict[int, str] = {}
+SCORE_TASK_OWNERS: dict[str, int] = {}
+SCORE_TASK_LOCK = Lock()
 
 
 class ScoreRequest(BaseModel):
@@ -75,11 +83,92 @@ class CVUploadResponse(BaseModel):
 class TaskStatusResponse(BaseModel):
     task_id: str
     status: str
+    progress: dict | None = None
     result: dict | None = None
     error: str | None = None
 
 
 UNSCORABLE_SCORE_LABEL = "Unscorable"
+
+
+def _build_score_progress(
+    *,
+    phase: str,
+    total_jobs: int = 0,
+    jobs_scored: int = 0,
+    jobs_failed: int = 0,
+    jobs_unscorable: int = 0,
+) -> dict[str, int | str]:
+    return {
+        "phase": phase,
+        "total_jobs": max(total_jobs, 0),
+        "jobs_scored": max(jobs_scored, 0),
+        "jobs_failed": max(jobs_failed, 0),
+        "jobs_unscorable": max(jobs_unscorable, 0),
+    }
+
+
+def _normalize_score_status(raw_status: str) -> str:
+    if raw_status == "SUCCESS":
+        return "success"
+    if raw_status == "FAILURE":
+        return "failure"
+    if raw_status == "RETRY":
+        return "retrying"
+    if raw_status in {"STARTED", "PROGRESS"}:
+        return "running"
+    return "queued"
+
+
+def _set_score_task_owner(user_id: int, task_id: str) -> None:
+    with SCORE_TASK_LOCK:
+        ACTIVE_SCORE_TASKS[user_id] = task_id
+        SCORE_TASK_OWNERS[task_id] = user_id
+
+
+def _clear_score_task(user_id: int, task_id: str | None = None) -> None:
+    with SCORE_TASK_LOCK:
+        current_task_id = ACTIVE_SCORE_TASKS.get(user_id)
+        if current_task_id is None:
+            return
+        if task_id is not None and current_task_id != task_id:
+            return
+        ACTIVE_SCORE_TASKS.pop(user_id, None)
+        SCORE_TASK_OWNERS.pop(current_task_id, None)
+
+
+def _get_active_score_task_id(user_id: int) -> str | None:
+    with SCORE_TASK_LOCK:
+        return ACTIVE_SCORE_TASKS.get(user_id)
+
+
+def _get_score_task_owner(task_id: str) -> int | None:
+    with SCORE_TASK_LOCK:
+        return SCORE_TASK_OWNERS.get(task_id)
+
+
+def _get_conflicting_score_task(user_id: int) -> str | None:
+    active_task_id = _get_active_score_task_id(user_id)
+    if not active_task_id:
+        return None
+
+    result = celery_app.AsyncResult(active_task_id)
+    if result.status in TERMINAL_SCORE_STATUSES:
+        _clear_score_task(user_id, active_task_id)
+        return None
+
+    return active_task_id
+
+
+def _coerce_score_progress(data: dict[str, Any] | None) -> dict[str, int | str]:
+    payload = data or {}
+    return _build_score_progress(
+        phase=str(payload.get("phase", "queued")),
+        total_jobs=int(payload.get("total_jobs", 0) or 0),
+        jobs_scored=int(payload.get("jobs_scored", 0) or 0),
+        jobs_failed=int(payload.get("jobs_failed", 0) or 0),
+        jobs_unscorable=int(payload.get("jobs_unscorable", 0) or 0),
+    )
 
 
 def _load_json_list(raw_value: str | None) -> list:
@@ -211,9 +300,29 @@ def _fetch_jobs(session: Session, user_id: int, job_ids: List[int]) -> List[Job]
     return list(session.exec(statement).all())
 
 
-@celery_app.task(name="tasks.score_jobs")
-def score_jobs_task(user_id: int, job_ids: List[int] | None = None) -> dict:
+@celery_app.task(bind=True, name="tasks.score_jobs")
+def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dict:
     selected_ids = job_ids or []
+
+    def report_progress(
+        *,
+        phase: str,
+        total_jobs: int = 0,
+        jobs_scored: int = 0,
+        jobs_failed: int = 0,
+        jobs_unscorable: int = 0,
+    ) -> None:
+        self.update_state(
+            state="PROGRESS",
+            meta=_build_score_progress(
+                phase=phase,
+                total_jobs=total_jobs,
+                jobs_scored=jobs_scored,
+                jobs_failed=jobs_failed,
+                jobs_unscorable=jobs_unscorable,
+            ),
+        )
+
     with Session(engine) as session:
         cv_text = _fetch_cv_text(session, user_id)
         if not cv_text.strip():
@@ -221,6 +330,7 @@ def score_jobs_task(user_id: int, job_ids: List[int] | None = None) -> dict:
                 "scored": 0,
                 "results": [],
                 "unscorable": 0,
+                "progress": _build_score_progress(phase="failed"),
                 "errors": [
                     "CV is not ready for scoring. Re-upload a resume with readable text before scoring jobs."
                 ],
@@ -228,7 +338,16 @@ def score_jobs_task(user_id: int, job_ids: List[int] | None = None) -> dict:
 
         job_rows = _fetch_jobs(session, user_id, selected_ids)
         if not job_rows:
-            return {"scored": 0, "results": [], "unscorable": 0, "errors": ["No matching jobs found to score"]}
+            return {
+                "scored": 0,
+                "results": [],
+                "unscorable": 0,
+                "progress": _build_score_progress(phase="completed"),
+                "errors": ["No matching jobs found to score"],
+            }
+
+        total_jobs = len(job_rows)
+        report_progress(phase="running", total_jobs=total_jobs)
 
         jobs_needing_description = [
             row for row in job_rows if not (row.description or "").strip() and (row.url or "").strip() and row.id is not None
@@ -248,6 +367,7 @@ def score_jobs_task(user_id: int, job_ids: List[int] | None = None) -> dict:
 
         scored_count = 0
         unscorable_count = 0
+        failed_count = 0
         errors: List[str] = []
         results: List[dict[str, object]] = []
 
@@ -267,6 +387,13 @@ def score_jobs_task(user_id: int, job_ids: List[int] | None = None) -> dict:
                 session.add(row)
                 unscorable_count += 1
                 errors.append(f"job_id={job_id}: missing job description; scoring skipped")
+                report_progress(
+                    phase="running",
+                    total_jobs=total_jobs,
+                    jobs_scored=scored_count,
+                    jobs_failed=failed_count,
+                    jobs_unscorable=unscorable_count,
+                )
                 continue
 
             try:
@@ -278,15 +405,47 @@ def score_jobs_task(user_id: int, job_ids: List[int] | None = None) -> dict:
                 )
             except llm_service.AuthenticationError as exc:
                 errors.append(f"job_id={job_id}: {exc}")
+                failed_count += 1
+                report_progress(
+                    phase="running",
+                    total_jobs=total_jobs,
+                    jobs_scored=scored_count,
+                    jobs_failed=failed_count,
+                    jobs_unscorable=unscorable_count,
+                )
                 continue
             except llm_service.RateLimitError as exc:
                 errors.append(f"job_id={job_id}: {exc}")
+                failed_count += 1
+                report_progress(
+                    phase="running",
+                    total_jobs=total_jobs,
+                    jobs_scored=scored_count,
+                    jobs_failed=failed_count,
+                    jobs_unscorable=unscorable_count,
+                )
                 continue
             except llm_service.ProviderError as exc:
                 errors.append(f"job_id={job_id}: {exc}")
+                failed_count += 1
+                report_progress(
+                    phase="running",
+                    total_jobs=total_jobs,
+                    jobs_scored=scored_count,
+                    jobs_failed=failed_count,
+                    jobs_unscorable=unscorable_count,
+                )
                 continue
             except Exception:
                 errors.append(f"job_id={job_id}: unexpected scoring error")
+                failed_count += 1
+                report_progress(
+                    phase="running",
+                    total_jobs=total_jobs,
+                    jobs_scored=scored_count,
+                    jobs_failed=failed_count,
+                    jobs_unscorable=unscorable_count,
+                )
                 continue
 
             score = int(item.get("compatibility_score", 0))
@@ -303,6 +462,13 @@ def score_jobs_task(user_id: int, job_ids: List[int] | None = None) -> dict:
             _append_job_event(row, "scored", score=score, score_label=status_value)
             session.add(row)
             scored_count += 1
+            report_progress(
+                phase="running",
+                total_jobs=total_jobs,
+                jobs_scored=scored_count,
+                jobs_failed=failed_count,
+                jobs_unscorable=unscorable_count,
+            )
             results.append(
                 {
                     "job_id": job_id,
@@ -313,7 +479,19 @@ def score_jobs_task(user_id: int, job_ids: List[int] | None = None) -> dict:
             )
 
         session.commit()
-        return {"scored": scored_count, "results": results, "unscorable": unscorable_count, "errors": errors}
+        return {
+            "scored": scored_count,
+            "results": results,
+            "unscorable": unscorable_count,
+            "errors": errors,
+            "progress": _build_score_progress(
+                phase="completed",
+                total_jobs=total_jobs,
+                jobs_scored=scored_count,
+                jobs_failed=failed_count,
+                jobs_unscorable=unscorable_count,
+            ),
+        }
 
 
 @router.post("/score-all", response_model=TaskAcceptedResponse, status_code=202)
@@ -329,8 +507,29 @@ def score_all(
             detail=str(exc),
         ) from exc
 
+    try:
+        conflicting_task_id = _get_conflicting_score_task(current_user.id)
+    except (OperationalError, ConnectionError, OSError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The scoring status service is unavailable. Check Redis and the Celery worker, then try again.",
+        ) from exc
+
+    if conflicting_task_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A scoring task is already running for this account. Wait for it to finish before starting another.",
+        )
+
     req = body or ScoreRequest()
-    task = score_jobs_task.delay(current_user.id, req.job_ids)
+    try:
+        task = score_jobs_task.delay(current_user.id, req.job_ids)
+    except (OperationalError, ConnectionError, OSError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The scoring task could not be queued because Redis or the Celery worker is unavailable.",
+        ) from exc
+    _set_score_task_owner(current_user.id, task.id)
     return TaskAcceptedResponse(
         task_id=task.id,
         status="queued",
@@ -343,12 +542,77 @@ def score_all_status(
     task_id: str = Query(..., description="Celery task identifier"),
     current_user: UserPublic = Depends(get_current_user),
 ) -> TaskStatusResponse:
-    result = celery_app.AsyncResult(task_id)
-    payload = TaskStatusResponse(task_id=task_id, status=result.status)
+    owner_id = _get_score_task_owner(task_id)
+    if owner_id is not None and owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scoring task not found")
+
+    try:
+        result = celery_app.AsyncResult(task_id)
+    except (OperationalError, ConnectionError, OSError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The scoring status service is unavailable. Check Redis and the Celery worker, then try again.",
+        ) from exc
+
+    try:
+        raw_status = result.status
+        raw_info = result.info
+    except Exception as exc:
+        _clear_score_task(current_user.id, task_id)
+        error_message = str(exc)
+        if "exception type" in error_message.lower():
+            error_message = (
+                "The background scoring task failed and its stored worker error payload could not be decoded. "
+                "Check the Celery worker logs for the original failure."
+            )
+
+        return TaskStatusResponse(
+            task_id=task_id,
+            status="failure",
+            progress=_build_score_progress(phase="failed"),
+            error=error_message,
+            result=None,
+        )
+
+    progress_data = raw_info if isinstance(raw_info, dict) else {}
+    payload = TaskStatusResponse(
+        task_id=task_id,
+        status=_normalize_score_status(raw_status),
+        progress=_coerce_score_progress(progress_data if progress_data else _build_score_progress(phase="queued")),
+        result=None,
+        error=None,
+    )
+
     if result.successful():
-        payload.result = result.result
+        try:
+            result_data = result.result if isinstance(result.result, dict) else {}
+        except Exception:
+            result_data = {}
+        payload.result = result_data
+        payload.progress = _coerce_score_progress(result_data.get("progress"))
+
+    if raw_status == "RETRY":
+        try:
+            payload.error = str(result.result)
+        except Exception:
+            payload.error = "The scoring task is retrying after a worker-side failure."
+
     if result.failed():
-        payload.error = str(result.result)
+        payload.progress = _coerce_score_progress(progress_data if progress_data else _build_score_progress(phase="failed"))
+        if isinstance(progress_data, dict) and isinstance(progress_data.get("error"), str):
+            payload.error = str(progress_data["error"])
+        if not payload.error:
+            try:
+                payload.error = str(result.result)
+            except Exception:
+                payload.error = (
+                    "The scoring task failed, but the worker error payload could not be decoded. "
+                    "Check the Celery worker logs for the original failure."
+                )
+
+    if raw_status in TERMINAL_SCORE_STATUSES:
+        _clear_score_task(current_user.id, task_id)
+
     return payload
 
 

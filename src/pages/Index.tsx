@@ -72,7 +72,7 @@ export default function Index() {
     enabled: isAuthenticated && !!scoreTaskId,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      return status === "SUCCESS" || status === "FAILURE" ? false : 3000;
+      return status === "success" || status === "failure" ? false : 3000;
     },
   });
 
@@ -81,23 +81,25 @@ export default function Index() {
       return;
     }
 
-    if (scoreTaskStatus.status === "SUCCESS") {
+    if (scoreTaskStatus.status === "success") {
       completionToastShownRef.current = true;
       setScoreTaskId(null);
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
 
       const scored = scoreTaskStatus.result?.scored ?? 0;
+      const unscorable = scoreTaskStatus.result?.unscorable ?? 0;
       const errors = scoreTaskStatus.result?.errors ?? [];
       const errorSummary = errors.length ? ` ${errors.length} jobs returned errors.` : "";
+      const skippedSummary = unscorable > 0 ? ` ${unscorable} job${unscorable === 1 ? "" : "s"} were skipped.` : "";
 
       toast({
         title: "Scoring complete",
-        description: `JARVIS finished scoring ${scored} job${scored === 1 ? "" : "s"}.${errorSummary}`,
+        description: `JARVIS finished scoring ${scored} job${scored === 1 ? "" : "s"}.${skippedSummary}${errorSummary}`,
       });
       return;
     }
 
-    if (scoreTaskStatus.status === "FAILURE") {
+    if (scoreTaskStatus.status === "failure") {
       completionToastShownRef.current = true;
       setScoreTaskId(null);
       toast({
@@ -110,6 +112,14 @@ export default function Index() {
 
   const isScoringQueued = !!scoreTaskId;
   const isScoring = scoreMutation.isPending || isScoringQueued;
+  const scoreButtonLabel =
+    scoreMutation.isPending
+      ? "Scoring..."
+      : scoreTaskStatus?.status === "queued"
+        ? "Queued..."
+        : scoreTaskStatus?.status === "running"
+          ? `Scoring ${scoreTaskStatus.progress?.jobs_scored ?? 0}/${scoreTaskStatus.progress?.total_jobs ?? 0}`
+          : "Score All";
   const sidebarWidth = sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH;
 
   useEffect(() => {
@@ -213,7 +223,17 @@ export default function Index() {
               />
             )}
             {activeSection === "jobs" && (
-              <JobFeed jobs={jobs} onGenerateForJob={j => setGenerateJob(j)} onScoreAll={() => scoreMutation.mutate()} isScoring={isScoring} />
+              <JobFeed
+                jobs={jobs}
+                onGenerateForJob={j => setGenerateJob(j)}
+                onScoreAll={() => {
+                  if (!isScoring) {
+                    scoreMutation.mutate();
+                  }
+                }}
+                isScoring={isScoring}
+                scoreButtonLabel={scoreButtonLabel}
+              />
             )}
             {activeSection === "applications" && (
               <Applications jobs={jobs} onViewJob={() => setActiveSection("jobs")} />

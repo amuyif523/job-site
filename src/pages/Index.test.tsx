@@ -103,12 +103,15 @@ vi.mock("@/components/JobFeed", () => ({
   JobFeed: ({
     onScoreAll,
     isScoring,
+    scoreButtonLabel,
   }: {
     onScoreAll?: () => void;
     isScoring?: boolean;
+    scoreButtonLabel?: string;
   }) => (
     <div>
       <button onClick={onScoreAll}>Score All</button>
+      <span>{scoreButtonLabel}</span>
       <span>{isScoring ? "Scoring..." : "Idle"}</span>
     </div>
   ),
@@ -177,14 +180,21 @@ describe("Index score-all queue behavior", () => {
     });
     fetchScoreAllStatusMock.mockResolvedValue({
       task_id: "score-task-1",
-      status: "SUCCESS",
-      result: { scored: 1, errors: [] },
+      status: "success",
+      progress: {
+        phase: "completed",
+        total_jobs: 1,
+        jobs_scored: 1,
+        jobs_failed: 0,
+        jobs_unscorable: 0,
+      },
+      result: { scored: 1, unscorable: 0, errors: [] },
     });
 
     renderIndex();
 
     fireEvent.click(await screen.findByText("Go Jobs"));
-    fireEvent.click(await screen.findByText("Score All"));
+    fireEvent.click(screen.getByRole("button", { name: "Score All" }));
 
     await waitFor(() => {
       expect(scoreAllMock).toHaveBeenCalledTimes(1);
@@ -204,6 +214,40 @@ describe("Index score-all queue behavior", () => {
         title: "Scoring complete",
         description: "JARVIS finished scoring 1 job.",
       });
+    });
+  });
+
+  it("shows running progress labels while the score task is active", async () => {
+    scoreAllMock.mockResolvedValue({
+      task_id: "score-task-2",
+      status: "queued",
+      message: "Scoring task started",
+    });
+    fetchScoreAllStatusMock.mockResolvedValue({
+      task_id: "score-task-2",
+      status: "running",
+      progress: {
+        phase: "running",
+        total_jobs: 3,
+        jobs_scored: 1,
+        jobs_failed: 0,
+        jobs_unscorable: 0,
+      },
+      result: undefined,
+      error: null,
+    });
+
+    renderIndex();
+
+    fireEvent.click(await screen.findByText("Go Jobs"));
+    fireEvent.click(screen.getByRole("button", { name: "Score All" }));
+
+    await waitFor(() => {
+      expect(fetchScoreAllStatusMock).toHaveBeenCalledWith("score-task-2");
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Scoring 1/3")).toBeInTheDocument();
     });
   });
 });

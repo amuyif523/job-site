@@ -45,6 +45,26 @@ type MockState = {
   jobs: MockJob[];
   uploadShouldFail?: boolean;
   scoreStatusCalls: number;
+  scrapeStatusCalls?: number;
+  scrapeStartResponse?: {
+    status: number;
+    body: Record<string, unknown>;
+  };
+  scrapeStatusSequence?: Array<{
+    task_id: string;
+    status: "queued" | "running" | "retrying" | "success" | "failure";
+    progress: {
+      phase: "queued" | "launching_browser" | "loading_page" | "extracting_jobs" | "saving_jobs" | "completed" | "failed";
+      page: number;
+      jobs_found: number;
+      jobs_saved: number;
+      target_role: string;
+      source: string;
+    };
+    result?: Record<string, unknown> | null;
+    error?: string | null;
+  }>;
+  jobsAfterScrape?: MockJob[];
 };
 
 const user = {
@@ -89,6 +109,46 @@ function newJob(overrides: Partial<MockJob> = {}): MockJob {
     status: "new",
     notes: "",
     events: [],
+    ...overrides,
+  };
+}
+
+function scrapeProgress(
+  phase: "queued" | "launching_browser" | "loading_page" | "extracting_jobs" | "saving_jobs" | "completed" | "failed",
+  overrides: Partial<{
+    page: number;
+    jobs_found: number;
+    jobs_saved: number;
+    target_role: string;
+    source: string;
+  }> = {}
+) {
+  return {
+    phase,
+    page: 0,
+    jobs_found: 0,
+    jobs_saved: 0,
+    target_role: "Engineer",
+    source: "JobTeaser",
+    ...overrides,
+  };
+}
+
+function scrapeStatus(
+  status: "queued" | "running" | "retrying" | "success" | "failure",
+  progress: ReturnType<typeof scrapeProgress>,
+  overrides: Partial<{
+    task_id: string;
+    result: Record<string, unknown> | null;
+    error: string | null;
+  }> = {}
+) {
+  return {
+    task_id: "scrape-task-1",
+    status,
+    progress,
+    result: null,
+    error: null,
     ...overrides,
   };
 }
@@ -145,6 +205,51 @@ async function mockAppApi(page: Page, state: MockState) {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify(state.jobs),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/scrape" && request.method() === "POST") {
+      const response = state.scrapeStartResponse ?? {
+        status: 202,
+        body: {
+          task_id: "scrape-task-1",
+          status: "queued",
+          message: "Scraping jobs for 'Engineer'...",
+        },
+      };
+
+      await route.fulfill({
+        status: response.status,
+        contentType: "application/json",
+        body: JSON.stringify(response.body),
+      });
+      return;
+    }
+
+    if (url.pathname === "/api/scrape/status") {
+      state.scrapeStatusCalls = (state.scrapeStatusCalls ?? 0) + 1;
+      const sequence = state.scrapeStatusSequence ?? [];
+      const index = Math.min(state.scrapeStatusCalls - 1, Math.max(sequence.length - 1, 0));
+      const payload = sequence[index];
+
+      if (!payload) {
+        await route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "No mock scrape status configured" }),
+        });
+        return;
+      }
+
+      if (payload.status === "success" && state.jobsAfterScrape) {
+        state.jobs = state.jobsAfterScrape;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(payload),
       });
       return;
     }
@@ -327,4 +432,172 @@ test("score-all works after uploading a CV", async ({ page }) => {
 
   await expect(page.getByText("91")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText("scored")).toBeVisible();
+});
+
+test("scrape success shows progress and saves new jobs", async ({ page }) => {
+  const scrapedJobs = [
+    newJob({ id: 1, title: "Frontend Engineer", company: "Acme", status: "new" }),
+    newJob({ id: 2, title: "Platform Engineer", company: "Nova", url: "https://example.com/jobs/2" }),
+  ];
+  const state: MockState = {
+    latestCV: readyCv(),
+    jobs: [],
+    scoreStatusCalls: 0,
+    scrapeStatusCalls: 0,
+    scrapeStatusSequence: [
+      scrapeStatus("running", scrapeProgress("loading_page", { page: 1 })),
+      scrapeStatus("running", scrapeProgress("extracting_jobs", { page: 1, jobs_found: 2 })),
+      scrapeStatus(
+        "success",
+        scrapeProgress("completed", { page: 1, jobs_found: 2, jobs_saved: 2 }),
+        {
+          result: {
+            saved: 2,
+            user_id: 1,
+            source: "JobTeaser",
+            target_role: "Engineer",
+            jobs_found: 2,
+            jobs_saved: 2,
+            progress: scrapeProgress("completed", { page: 1, jobs_found: 2, jobs_saved: 2 }),
+          },
+        }
+      ),
+    ],
+    jobsAfterScrape: scrapedJobs,
+  };
+
+  await mockAppApi(page, state);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Scrape" }).click();
+  await expect(page.getByText("Loading page 1")).toBeVisible();
+  await page.waitForTimeout(3200);
+  await expect(page.getByText("Last scrape saved 2 jobs")).toBeVisible();
+
+  await page.getByRole("button", { name: "Jobs" }).click();
+  await expect(page.getByText("Frontend Engineer")).toBeVisible();
+  await expect(page.getByText("Platform Engineer")).toBeVisible();
+});
+
+test("scrape failure shows actionable guidance", async ({ page }) => {
+  const state: MockState = {
+    latestCV: readyCv(),
+    jobs: [],
+    scoreStatusCalls: 0,
+    scrapeStatusCalls: 0,
+    scrapeStatusSequence: [
+      scrapeStatus(
+        "failure",
+        scrapeProgress("failed"),
+        {
+          error: "Executable doesn't exist for browserType.launch",
+        }
+      ),
+    ],
+  };
+
+  await mockAppApi(page, state);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Scrape" }).click();
+  await expect(page.getByText("Last scrape failed")).toBeVisible();
+  await expect(page.getByText(/Browser setup issue/i)).toBeVisible();
+  await expect(page.getByText(/Install Playwright browsers/i)).toBeVisible();
+});
+
+test("refresh during an active scrape reconnects to progress", async ({ page }) => {
+  const state: MockState = {
+    latestCV: readyCv(),
+    jobs: [],
+    scoreStatusCalls: 0,
+    scrapeStatusCalls: 0,
+    scrapeStatusSequence: [
+      scrapeStatus("running", scrapeProgress("loading_page", { page: 1 })),
+      scrapeStatus("running", scrapeProgress("extracting_jobs", { page: 1, jobs_found: 3 })),
+      scrapeStatus("running", scrapeProgress("saving_jobs", { page: 1, jobs_found: 3, jobs_saved: 2 })),
+      scrapeStatus(
+        "success",
+        scrapeProgress("completed", { page: 1, jobs_found: 3, jobs_saved: 2 }),
+        {
+          result: {
+            saved: 2,
+            user_id: 1,
+            source: "JobTeaser",
+            target_role: "Engineer",
+            jobs_found: 3,
+            jobs_saved: 2,
+            progress: scrapeProgress("completed", { page: 1, jobs_found: 3, jobs_saved: 2 }),
+          },
+        }
+      ),
+    ],
+    jobsAfterScrape: [newJob({ id: 1 }), newJob({ id: 2, title: "Design Engineer", url: "https://example.com/jobs/2" })],
+  };
+
+  await mockAppApi(page, state);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Scrape" }).click();
+  await expect(page.getByText("Loading page 1")).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByText(/Jobs found: 3/i)).toBeVisible();
+  await page.waitForTimeout(3200);
+  await expect(page.getByText("Last scrape saved 2 jobs")).toBeVisible();
+});
+
+test("no jobs found outcome shows guidance", async ({ page }) => {
+  const state: MockState = {
+    latestCV: readyCv(),
+    jobs: [],
+    scoreStatusCalls: 0,
+    scrapeStatusCalls: 0,
+    scrapeStatusSequence: [
+      scrapeStatus(
+        "success",
+        scrapeProgress("completed", { page: 1, jobs_found: 0, jobs_saved: 0 }),
+        {
+          result: {
+            saved: 0,
+            user_id: 1,
+            source: "JobTeaser",
+            target_role: "Engineer",
+            jobs_found: 0,
+            jobs_saved: 0,
+            progress: scrapeProgress("completed", { page: 1, jobs_found: 0, jobs_saved: 0 }),
+          },
+        }
+      ),
+    ],
+  };
+
+  await mockAppApi(page, state);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Scrape" }).click();
+  await expect(page.getByText("Last scrape found no matching jobs")).toBeVisible();
+  await expect(page.getByText(/Try adjusting your target role/i)).toBeVisible();
+});
+
+test("duplicate scrape prevention keeps the button disabled while running", async ({ page }) => {
+  const state: MockState = {
+    latestCV: readyCv(),
+    jobs: [],
+    scoreStatusCalls: 0,
+    scrapeStatusCalls: 0,
+    scrapeStatusSequence: [
+      scrapeStatus("running", scrapeProgress("loading_page", { page: 1 })),
+      scrapeStatus("running", scrapeProgress("extracting_jobs", { page: 1, jobs_found: 1 })),
+    ],
+  };
+
+  await mockAppApi(page, state);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Scrape" }).click();
+  const runningButton = page.getByRole("button", { name: "Loading page 1" });
+  await expect(runningButton).toBeDisabled();
+  await runningButton.click({ force: true });
+
+  await expect(page.getByText(/Rule: one scrape runs at a time/i)).toBeVisible();
 });

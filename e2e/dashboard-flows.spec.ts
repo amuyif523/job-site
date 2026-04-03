@@ -49,6 +49,24 @@ type MockState = {
   jobs: MockJob[];
   uploadShouldFail?: boolean;
   scoreStatusCalls: number;
+  scoreStartResponse?: {
+    status: number;
+    body: Record<string, unknown>;
+  };
+  scoreStatusSequence?: Array<{
+    task_id: string;
+    status: "queued" | "running" | "retrying" | "success" | "failure" | "PENDING";
+    progress?: {
+      phase: "queued" | "running" | "completed" | "failed";
+      total_jobs: number;
+      jobs_scored: number;
+      jobs_failed: number;
+      jobs_unscorable: number;
+    };
+    result?: Record<string, unknown> | null;
+    error?: string | null;
+    jobsAfterStatus?: MockJob[];
+  }>;
   scrapeStatusCalls?: number;
   scrapeStartResponse?: {
     status: number;
@@ -263,69 +281,82 @@ async function mockAppApi(page: Page, state: MockState) {
     }
 
     if (url.pathname === "/api/score-all" && request.method() === "POST") {
-      await route.fulfill({
+      const response = state.scoreStartResponse ?? {
         status: 202,
-        contentType: "application/json",
-        body: JSON.stringify({
+        body: {
           task_id: "score-task-1",
           status: "queued",
           message: "Scoring task started",
-        }),
+        },
+      };
+      await route.fulfill({
+        status: response.status,
+        contentType: "application/json",
+        body: JSON.stringify(response.body),
       });
       return;
     }
 
     if (url.pathname === "/api/score-all/status") {
-      state.scoreStatusCalls += 1;
-
-      if (state.scoreStatusCalls < 2) {
+      if (url.searchParams.get("task_id") === "foreign-task") {
         await route.fulfill({
-          status: 200,
+          status: 404,
           contentType: "application/json",
-          body: JSON.stringify({
-            task_id: "score-task-1",
-            status: "PENDING",
-          }),
+          body: JSON.stringify({ detail: "Scoring task not found" }),
         });
         return;
       }
 
-      state.jobs = state.jobs.map((job) =>
-        job.id === 1
-          ? {
-              ...job,
-              description: "Build polished React product experiences with TypeScript, design systems, testing, and collaboration across product and engineering.".repeat(2),
-              enrichment_status: "enriched",
-              enrichment_error: "",
-              scoring_ready: true,
-              score: 91,
-              score_label: "Excellent",
-              score_reasoning: ["Strong React and product fit"],
-              status: "scored",
-            }
-          : job
-      );
+      state.scoreStatusCalls += 1;
+      const sequence = state.scoreStatusSequence ?? [
+        {
+          task_id: "score-task-1",
+          status: "PENDING",
+        },
+        {
+          task_id: "score-task-1",
+          status: "success",
+          progress: {
+            phase: "completed",
+            total_jobs: 1,
+            jobs_scored: 1,
+            jobs_failed: 0,
+            jobs_unscorable: 0,
+          },
+          result: {
+            scored: 1,
+            unscorable: 0,
+            errors: [],
+          },
+          jobsAfterStatus: state.jobs.map((job) =>
+            job.id === 1
+              ? {
+                  ...job,
+                  description: "Build polished React product experiences with TypeScript, design systems, testing, and collaboration across product and engineering.".repeat(2),
+                  enrichment_status: "enriched",
+                  enrichment_error: "",
+                  scoring_ready: true,
+                  score: 91,
+                  score_label: "Excellent",
+                  score_reasoning: ["Strong React and product fit"],
+                  status: "scored",
+                }
+              : job
+          ),
+        },
+      ];
+      const index = Math.min(state.scoreStatusCalls - 1, Math.max(sequence.length - 1, 0));
+      const payload = sequence[index];
+
+      if (payload?.jobsAfterStatus) {
+        state.jobs = payload.jobsAfterStatus;
+      }
 
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-          body: JSON.stringify({
-            task_id: "score-task-1",
-            status: "success",
-            progress: {
-              phase: "completed",
-              total_jobs: 1,
-              jobs_scored: 1,
-              jobs_failed: 0,
-              jobs_unscorable: 0,
-            },
-            result: {
-              scored: 1,
-              unscorable: 0,
-              errors: [],
-            },
-          }),
-        });
+        body: JSON.stringify(payload),
+      });
       return;
     }
 
@@ -503,6 +534,186 @@ test("score-all works after uploading a CV", async ({ page }) => {
 
   await expect(page.getByText("91")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText("scored")).toBeVisible();
+});
+
+test("scoring blocked on missing descriptions shows skipped guidance", async ({ page }) => {
+  const state: MockState = {
+    latestCV: readyCv(),
+    jobs: [
+      newJob({
+        id: 1,
+        description: "",
+        enrichment_status: "missing",
+        scoring_ready: false,
+        score: null,
+        score_label: null,
+        status: "new",
+      }),
+    ],
+    scoreStatusCalls: 0,
+    scoreStatusSequence: [
+      {
+        task_id: "score-task-1",
+        status: "running",
+        progress: {
+          phase: "running",
+          total_jobs: 1,
+          jobs_scored: 0,
+          jobs_failed: 0,
+          jobs_unscorable: 0,
+        },
+      },
+      {
+        task_id: "score-task-1",
+        status: "success",
+        progress: {
+          phase: "completed",
+          total_jobs: 1,
+          jobs_scored: 0,
+          jobs_failed: 0,
+          jobs_unscorable: 1,
+        },
+        result: {
+          scored: 0,
+          unscorable: 1,
+          errors: ["job_id=1: incomplete job description; scoring skipped"],
+        },
+        jobsAfterStatus: [
+          newJob({
+            id: 1,
+            description: "",
+            enrichment_status: "missing",
+            scoring_ready: false,
+            score: null,
+            score_label: "Unscorable",
+            score_reasoning: ["This job could not be scored because no usable job description was available for the listing."],
+            red_flags: ["Missing job description"],
+            status: "new",
+          }),
+        ],
+      },
+    ],
+  };
+
+  await mockAppApi(page, state);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Jobs" }).click();
+  await page.getByRole("button", { name: "Score All" }).click();
+
+  await expect(page.getByText(/0 failed, 1 skipped/i)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/Jobs with incomplete descriptions may need a new scrape or manual review/i)).toBeVisible();
+});
+
+test("refresh during active scoring reconnects to score progress", async ({ page }) => {
+  const state: MockState = {
+    latestCV: readyCv(),
+    jobs: [newJob({ id: 1, description: "", enrichment_status: "pending", scoring_ready: false })],
+    scoreStatusCalls: 0,
+    scoreStatusSequence: [
+      {
+        task_id: "score-task-1",
+        status: "running",
+        progress: {
+          phase: "running",
+          total_jobs: 1,
+          jobs_scored: 0,
+          jobs_failed: 0,
+          jobs_unscorable: 0,
+        },
+      },
+      {
+        task_id: "score-task-1",
+        status: "running",
+        progress: {
+          phase: "running",
+          total_jobs: 1,
+          jobs_scored: 0,
+          jobs_failed: 0,
+          jobs_unscorable: 0,
+        },
+      },
+      {
+        task_id: "score-task-1",
+        status: "success",
+        progress: {
+          phase: "completed",
+          total_jobs: 1,
+          jobs_scored: 1,
+          jobs_failed: 0,
+          jobs_unscorable: 0,
+        },
+        result: {
+          scored: 1,
+          unscorable: 0,
+          errors: [],
+        },
+      },
+    ],
+  };
+
+  await mockAppApi(page, state);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Jobs" }).click();
+  await page.getByRole("button", { name: "Score All" }).click();
+  await expect(page.getByText("Scoring jobs")).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByText("Scoring jobs")).toBeVisible();
+  await expect(page.getByText(/JARVIS is keeping this scoring task visible across refreshes/i)).toBeVisible();
+});
+
+test("provider failure messaging is shown when scoring cannot run", async ({ page }) => {
+  const state: MockState = {
+    latestCV: readyCv(),
+    jobs: [newJob()],
+    scoreStatusCalls: 0,
+    scoreStatusSequence: [
+      {
+        task_id: "score-task-1",
+        status: "failure",
+        progress: {
+          phase: "failed",
+          total_jobs: 1,
+          jobs_scored: 0,
+          jobs_failed: 1,
+          jobs_unscorable: 0,
+        },
+        error: "Missing backend model provider key.",
+      },
+    ],
+  };
+
+  await mockAppApi(page, state);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Jobs" }).click();
+  await page.getByRole("button", { name: "Score All" }).click();
+
+  await expect(page.getByText(/Missing backend model provider key/i)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/Add a supported provider API key/i)).toBeVisible();
+});
+
+test("unauthorized score task access is rejected", async ({ page }) => {
+  const state: MockState = {
+    latestCV: readyCv(),
+    jobs: [newJob()],
+    scoreStatusCalls: 0,
+  };
+
+  await mockAppApi(page, state);
+  await page.goto("/");
+
+  const response = await page.evaluate(async () => {
+    const res = await fetch("http://localhost:8000/api/score-all/status?task_id=foreign-task", {
+      credentials: "include",
+    });
+    return {
+      status: res.status,
+      body: await res.json(),
+    };
+  });
+
+  expect(response.status).toBe(404);
+  expect(response.body.detail).toBe("Scoring task not found");
 });
 
 test("upload, scrape, score, review, and generate application flows end to end", async ({ page }) => {

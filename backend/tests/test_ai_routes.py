@@ -389,6 +389,61 @@ class AIRouteTests(unittest.TestCase):
             self.assertFalse(job.scoring_ready)
             self.assertIn("too short to score reliably", (job.score_reasoning or "").lower())
 
+    def test_score_jobs_task_returns_partial_failure_summary(self) -> None:
+        with Session(self.engine) as session:
+            session.add(
+                CVData(
+                    user_id=1,
+                    filename="resume.pdf",
+                    extracted_text="RAW CV TEXT FOR SCORING",
+                    parsed_json="{}",
+                )
+            )
+            session.add(
+                Job(
+                    id=14,
+                    user_id=1,
+                    title="Backend Engineer",
+                    company="Acme",
+                    location="Remote",
+                    url="https://example.com/jobs/14",
+                    description="Python APIs and SQL systems " * 20,
+                )
+            )
+            session.add(
+                Job(
+                    id=15,
+                    user_id=1,
+                    title="Data Analyst",
+                    company="Acme",
+                    location="Remote",
+                    url="https://example.com/jobs/15",
+                    description="Business intelligence, SQL, dashboards, experimentation, reporting, and stakeholder communication " * 10,
+                )
+            )
+            session.commit()
+
+        async def fake_score_from_ai(cv_text: str, job_description: str) -> dict[str, object]:
+            if "Business intelligence" in job_description:
+                raise ai_router.llm_service.RateLimitError("Rate limit hit")
+            return {
+                "compatibility_score": 88,
+                "match_status": "Excellent",
+                "reasoning": "Strong fit.",
+            }
+
+        with (
+            patch.object(ai_router, "engine", self.engine),
+            patch.object(ai_router.llm_service, "get_score_from_ai", new=fake_score_from_ai),
+        ):
+            result = ai_router.score_jobs_task(1, [14, 15])
+
+        self.assertEqual(result["scored"], 1)
+        self.assertEqual(result["unscorable"], 0)
+        self.assertIn("job_id=15: Rate limit hit", result["errors"])
+        self.assertEqual(result["progress"]["jobs_failed"], 1)
+        self.assertEqual(result["progress"]["jobs_scored"], 1)
+
     def test_score_all_returns_clear_error_when_no_provider_is_configured(self) -> None:
         with patch.object(
             ai_router.llm_service,

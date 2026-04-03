@@ -6,6 +6,22 @@ import Index from "@/pages/Index";
 import { fetchJobs, fetchLatestCV, fetchScoreAllStatus, scoreAll } from "@/lib/api";
 
 const toastMock = vi.fn();
+const authState = {
+  isAuthenticated: true,
+  isAuthLoading: false,
+  authError: null,
+  user: {
+    id: 1,
+    name: "Test User",
+    email: "test@example.com",
+    target_role: "Engineer",
+    plan: "free",
+  },
+  isLoggingOut: false,
+  setAuthenticatedUser: vi.fn(),
+  retryAuth: vi.fn(),
+  logout: vi.fn(),
+};
 
 vi.mock("@/hooks/use-toast", () => ({
   toast: (...args: unknown[]) => toastMock(...args),
@@ -23,22 +39,7 @@ vi.mock("@/lib/api", async () => {
 });
 
 vi.mock("@/contexts/AuthContext", () => ({
-  useAuth: () => ({
-    isAuthenticated: true,
-    isAuthLoading: false,
-    authError: null,
-    user: {
-      id: 1,
-      name: "Test User",
-      email: "test@example.com",
-      target_role: "Engineer",
-      plan: "free",
-    },
-    isLoggingOut: false,
-    setAuthenticatedUser: vi.fn(),
-    retryAuth: vi.fn(),
-    logout: vi.fn(),
-  }),
+  useAuth: () => authState,
 }));
 
 vi.mock("@/components/ParticleBackground", () => ({
@@ -146,6 +147,7 @@ describe("Index score-all queue behavior", () => {
   beforeEach(() => {
     vi.useRealTimers();
     localStorage.clear();
+    authState.user.id = USER_ID;
     toastMock.mockReset();
     fetchJobsMock.mockReset();
     fetchLatestCVMock.mockReset();
@@ -355,5 +357,97 @@ describe("Index score-all queue behavior", () => {
     expect(screen.queryByText(/Status temporarily unavailable/i)).not.toBeInTheDocument();
     expect(screen.getByText("80%")).toBeInTheDocument();
     expect(screen.getByText("Failed")).toBeInTheDocument();
+  });
+
+  it("shows partial-failure guidance when some jobs fail or are skipped", async () => {
+    scoreAllMock.mockResolvedValue({
+      task_id: "score-task-partial",
+      status: "queued",
+      message: "Scoring task started",
+    });
+    fetchScoreAllStatusMock.mockResolvedValue({
+      task_id: "score-task-partial",
+      status: "success",
+      progress: {
+        phase: "completed",
+        total_jobs: 3,
+        jobs_scored: 1,
+        jobs_failed: 1,
+        jobs_unscorable: 1,
+      },
+      result: {
+        scored: 1,
+        unscorable: 1,
+        errors: [
+          "job_id=2: Rate limit hit",
+          "job_id=3: incomplete job description; scoring skipped",
+        ],
+      },
+    });
+
+    renderIndex();
+
+    fireEvent.click(await screen.findByText("Go Jobs"));
+    fireEvent.click(screen.getByRole("button", { name: "Score All" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/1 failed, 1 skipped/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Retry after the provider rate limit window resets/i)).toBeInTheDocument();
+    expect(screen.getByText(/Rate limit hit/i)).toBeInTheDocument();
+  });
+
+  it("shows full failure guidance when the score task fails", async () => {
+    scoreAllMock.mockResolvedValue({
+      task_id: "score-task-failed",
+      status: "queued",
+      message: "Scoring task started",
+    });
+    fetchScoreAllStatusMock.mockResolvedValue({
+      task_id: "score-task-failed",
+      status: "failure",
+      progress: {
+        phase: "failed",
+        total_jobs: 2,
+        jobs_scored: 0,
+        jobs_failed: 2,
+        jobs_unscorable: 0,
+      },
+      result: null,
+      error: "Missing backend model provider key.",
+    });
+
+    renderIndex();
+
+    fireEvent.click(await screen.findByText("Go Jobs"));
+    fireEvent.click(screen.getByRole("button", { name: "Score All" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Missing backend model provider key/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Check the configured AI provider key and try again/i)).toBeInTheDocument();
+  });
+
+  it("ignores another user's persisted score task state", async () => {
+    localStorage.setItem("jarvis_active_score_task_id:2", "score-task-other-user");
+    localStorage.setItem(
+      "jarvis_active_score_progress:2",
+      JSON.stringify({
+        phase: "running",
+        total_jobs: 4,
+        jobs_scored: 2,
+        jobs_failed: 0,
+        jobs_unscorable: 0,
+      })
+    );
+
+    renderIndex();
+
+    await waitFor(() => {
+      expect(fetchJobsMock).toHaveBeenCalled();
+    });
+
+    expect(fetchScoreAllStatusMock).not.toHaveBeenCalled();
+    expect(screen.queryByText("Scoring jobs")).not.toBeInTheDocument();
   });
 });

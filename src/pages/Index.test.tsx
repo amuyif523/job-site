@@ -216,7 +216,7 @@ describe("Index score-all queue behavior", () => {
       expect(fetchScoreAllStatusMock).toHaveBeenCalledWith("score-task-1");
     });
 
-    expect(screen.getByText("Last score run completed")).toBeInTheDocument();
+    expect(screen.getByText(/Last result: success/i)).toBeInTheDocument();
     expect(screen.getByText("Scored")).toBeInTheDocument();
 
     await waitFor(() => {

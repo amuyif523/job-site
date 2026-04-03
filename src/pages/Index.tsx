@@ -28,6 +28,7 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { Progress } from "@/components/ui/progress";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
 const ACTIVE_SCORE_TASK_KEY = "jarvis_active_score_task_id";
 const ACTIVE_SCORE_PROGRESS_KEY = "jarvis_active_score_progress";
@@ -178,18 +179,114 @@ function getScoreFailureGuidance(error?: string | null): string {
   return "Retry the score task. If it keeps failing, inspect the backend worker logs.";
 }
 
+function getScoreRunSummaryText(summary: ScoreRunSummary | null): string {
+  if (!summary) {
+    return "No score run has completed yet.";
+  }
+
+  const result = summary.result;
+  const progress = summary.progress;
+  const scored = result?.scored ?? progress.jobs_scored ?? 0;
+  const failed = progress.jobs_failed ?? 0;
+  const skipped = result?.unscorable ?? progress.jobs_unscorable ?? 0;
+  const total = progress.total_jobs ?? 0;
+
+  if (summary.status === "failure") {
+    return failed > 0
+      ? `The last run failed after processing ${failed} job${failed === 1 ? "" : "s"}.`
+      : "The last run failed before any jobs were scored.";
+  }
+
+  if (total === 0) {
+    return "The last run did not find any jobs that needed scoring.";
+  }
+
+  if (scored === 0 && failed === 0 && skipped === 0) {
+    return "The last run completed, but no jobs needed scoring.";
+  }
+
+  if (scored === 0 && failed > 0) {
+    return `The last run did not score any jobs successfully. ${failed} job${failed === 1 ? "" : "s"} failed.`;
+  }
+
+  if (failed > 0 || skipped > 0) {
+    return `The last run scored ${scored} job${scored === 1 ? "" : "s"}, with ${failed} failure${failed === 1 ? "" : "s"} and ${skipped} skipped.`;
+  }
+
+  return `The last run scored ${scored} job${scored === 1 ? "" : "s"} successfully.`;
+}
+
+function getScoreOutcomeGuidance(summary: ScoreRunSummary | null): { tone: "success" | "warning" | "failure"; message: string } | null {
+  if (!summary) return null;
+
+  if (summary.status === "failure") {
+    return {
+      tone: "failure",
+      message: `${summary.error || "The score task failed."} ${getScoreFailureGuidance(summary.error)}`,
+    };
+  }
+
+  const result = summary.result;
+  const progress = summary.progress;
+  const scored = result?.scored ?? progress.jobs_scored ?? 0;
+  const failed = progress.jobs_failed ?? 0;
+  const skipped = result?.unscorable ?? progress.jobs_unscorable ?? 0;
+  const total = progress.total_jobs ?? 0;
+  const errors = result?.errors ?? [];
+  const combinedErrors = errors.join(" ").toLowerCase();
+
+  if (total === 0 || (scored === 0 && failed === 0 && skipped === 0)) {
+    return {
+      tone: "success",
+      message: "No jobs needed scoring. Existing scores are already up to date.",
+    };
+  }
+
+  if (scored === 0 && failed > 0) {
+    return {
+      tone: "failure",
+      message: `${failed} job${failed === 1 ? "" : "s"} failed during scoring. ${getScoreFailureGuidance(errors[0] ?? summary.error)}`,
+    };
+  }
+
+  if (failed > 0 || skipped > 0) {
+    let guidance = "Review skipped or failed jobs before relying on the match list.";
+    if (combinedErrors.includes("provider key") || combinedErrors.includes("api key")) {
+      guidance = "Check the configured AI provider key before retrying.";
+    } else if (combinedErrors.includes("rate limit")) {
+      guidance = "Retry after the provider rate limit window resets.";
+    } else if (combinedErrors.includes("job description")) {
+      guidance = "Jobs with incomplete descriptions may need a new scrape or manual review.";
+    } else if (combinedErrors.includes("cv is not ready")) {
+      guidance = "Re-upload the CV with readable text before retrying.";
+    }
+
+    return {
+      tone: "warning",
+      message: `${failed} failed, ${skipped} skipped. ${guidance}`,
+    };
+  }
+
+  return {
+    tone: "success",
+    message: "All jobs in the last run scored successfully.",
+  };
+}
+
 function ScoreStatusPanel({
   scoring,
   progress,
   lastSummary,
   statusUnavailable,
   pollFailures,
+  jobs,
 }: {
   scoring: boolean;
   progress: ScoreTaskProgress | null;
   lastSummary: ScoreRunSummary | null;
   statusUnavailable: boolean;
   pollFailures: number;
+  jobs: Job[];
 }) {
   if (!scoring && !lastSummary) {
     return null;
@@ -201,6 +298,10 @@ function ScoreStatusPanel({
   const remaining = getRemainingJobs(activeProgress);
   const progressPercent = getScoreProgressPercent(activeProgress);
   const errorText = !scoring ? lastSummary?.error ?? null : null;
+  const scoredJobs = jobs.filter((job) => job.score !== null || job.score_label === "Unscorable").length;
+  const scoreFreshnessLabel = lastSummary ? `Visible scores last refreshed ${formatScoreTimestamp(lastSummary.timestamp)}` : "Visible scores have not been refreshed yet.";
+  const outcomeGuidance = !scoring ? getScoreOutcomeGuidance(lastSummary) : null;
+  const runSummaryText = getScoreRunSummaryText(lastSummary);
 
   return (
     <section className="mb-6 rounded-xl border border-white/10 bg-white/[0.03] p-4 shadow-[0_10px_40px_rgba(0,0,0,0.2)]">
@@ -213,6 +314,7 @@ function ScoreStatusPanel({
               ? "JARVIS is keeping this scoring task visible across refreshes."
               : `Last update: ${formatScoreTimestamp(lastSummary?.timestamp ?? null)}`}
           </p>
+          {!scoring && <p className="font-mono text-[11px] text-muted-foreground">{scoreFreshnessLabel}</p>}
         </div>
         <div className="rounded-md border border-white/10 bg-black/20 px-3 py-2 font-mono text-[11px] text-muted-foreground">
           {scoring ? "Single scoring task per account" : lastSummary?.status === "success" ? "Last result: success" : "Last result: failure"}
@@ -250,6 +352,11 @@ function ScoreStatusPanel({
         </div>
       </div>
 
+      <div className="mt-4 rounded-md border border-white/10 bg-black/20 px-3 py-3 font-mono text-[11px] text-muted-foreground">
+        <p>{scoring ? "This run is updating your visible match scores in real time." : runSummaryText}</p>
+        <p className="mt-2">Score coverage: {scoredJobs} of {jobs.length} job{jobs.length === 1 ? "" : "s"} currently have a score or a recorded skip result.</p>
+      </div>
+
       {statusUnavailable && (
         <div className="mt-4 rounded-md border border-amber-400/20 bg-amber-400/10 px-3 py-3 font-mono text-[11px] text-amber-200">
           Status temporarily unavailable. JARVIS is keeping the scoring task visible and retrying in the background.
@@ -257,19 +364,29 @@ function ScoreStatusPanel({
         </div>
       )}
 
-      {!scoring && lastSummary?.status === "success" && currentResult && (
-        <div className="mt-4 rounded-md border border-emerald-400/20 bg-emerald-400/10 px-3 py-3 font-mono text-[11px] text-emerald-200">
-          Last run scored {currentResult.scored ?? 0} job{(currentResult.scored ?? 0) === 1 ? "" : "s"}.
-          {(currentResult.unscorable ?? 0) > 0 ? ` ${(currentResult.unscorable ?? 0)} were skipped.` : ""}
-          {(currentResult.errors?.length ?? 0) > 0 ? ` ${currentResult.errors?.length ?? 0} returned errors.` : ""}
+      {!scoring && outcomeGuidance && (
+        <div
+          className={cn(
+            "mt-4 rounded-md px-3 py-3 font-mono text-[11px]",
+            outcomeGuidance.tone === "success" && "border border-emerald-400/20 bg-emerald-400/10 text-emerald-200",
+            outcomeGuidance.tone === "warning" && "border border-amber-400/20 bg-amber-400/10 text-amber-200",
+            outcomeGuidance.tone === "failure" && "border border-jarvis-crimson/20 bg-jarvis-crimson/10 text-jarvis-crimson"
+          )}
+        >
+          {outcomeGuidance.message}
         </div>
       )}
 
-      {!scoring && lastSummary?.status === "failure" && (
-        <div className="mt-4 rounded-md border border-jarvis-crimson/20 bg-jarvis-crimson/10 px-3 py-3 font-mono text-[11px] text-jarvis-crimson">
-          {errorText || "The background scoring worker failed."} {getScoreFailureGuidance(errorText)}
+      {!scoring && lastSummary?.status === "success" && currentResult?.errors?.length ? (
+        <div className="mt-4 rounded-md border border-white/10 bg-black/20 px-3 py-3 font-mono text-[11px] text-muted-foreground">
+          <p className="text-foreground">Error summary from the last run</p>
+          <ul className="mt-2 space-y-1">
+            {currentResult.errors.slice(0, 3).map((error, index) => (
+              <li key={`${error}-${index}`}>• {error}</li>
+            ))}
+          </ul>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -565,6 +682,7 @@ export default function Index() {
                 lastSummary={lastScoreSummary}
                 statusUnavailable={scoreStatusUnavailable}
                 pollFailures={scorePollFailures}
+                jobs={jobs}
               />
 
               {activeSection === "dashboard" && (

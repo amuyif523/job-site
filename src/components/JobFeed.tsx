@@ -27,6 +27,33 @@ const scoreLabelColors: Record<string, string> = {
   Poor: "#E11D48",
   Unscorable: "#6B7280",
 };
+const MIN_RELIABLE_DESCRIPTION_LENGTH = 200;
+
+function hasIncompleteScoreData(job: Job): boolean {
+  const description = job.description?.trim() || "";
+  const reasons = job.score_reasoning ?? [];
+  const warningText = `${reasons.join(" ")} ${(job.red_flags ?? []).join(" ")}`.toLowerCase();
+
+  return (
+    job.score_label === "Unscorable" ||
+    description.length < MIN_RELIABLE_DESCRIPTION_LENGTH ||
+    warningText.includes("no usable job description") ||
+    warningText.includes("missing job description") ||
+    warningText.includes("enrichment failed")
+  );
+}
+
+function getScoreContextMessage(job: Job): string {
+  if (job.score_label === "Unscorable") {
+    return "This job could not be scored because the listing data was too incomplete.";
+  }
+
+  if (hasIncompleteScoreData(job)) {
+    return "This score was generated from limited job data, so treat it as directional rather than final.";
+  }
+
+  return "This score is based on the stored job description and your current CV.";
+}
 
 export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreButtonLabel }: JobFeedProps) {
   const [search, setSearch] = useState("");
@@ -67,6 +94,7 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreBu
   const scoreLabelColor = (label: string | null) => (label ? scoreLabelColors[label] || "#6B7280" : "#6B7280");
 
   const tabs = ["description", "score breakdown", "red flags", "notes"];
+  const selectedHasIncompleteScoreData = selected ? hasIncompleteScoreData(selected) : false;
 
   return (
     <div className="animate-fade-up flex gap-0 h-[calc(100vh-64px)]">
@@ -192,6 +220,21 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreBu
                       {selected.score_label}
                     </p>
                   )}
+                  {(selected.score !== null || selected.score_label === "Unscorable") && (
+                    <div
+                      className={cn(
+                        "mt-3 rounded-md border px-3 py-2 font-mono text-[11px]",
+                        selectedHasIncompleteScoreData
+                          ? "border-amber-400/20 bg-amber-400/10 text-amber-200"
+                          : "border-emerald-400/20 bg-emerald-400/10 text-emerald-200"
+                      )}
+                    >
+                      <p className="uppercase tracking-[0.2em] text-[10px]">
+                        {selectedHasIncompleteScoreData ? "Limited Score Context" : "Why This Score Exists"}
+                      </p>
+                      <p className="mt-1">{getScoreContextMessage(selected)}</p>
+                    </div>
+                  )}
                   {/* Action buttons */}
                   <div className="flex gap-2 mt-3">
                     <button
@@ -244,19 +287,40 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreBu
 
             <div className="max-h-[40vh] overflow-y-auto font-mono text-xs text-muted-foreground leading-relaxed">
               {activeTab === "description" && (
-                selected.description ? (
-                  <pre className="whitespace-pre-wrap">{selected.description}</pre>
-                ) : (
-                  <p>No usable job description is stored for this listing yet.</p>
-                )
+                <div className="space-y-3">
+                  {selectedHasIncompleteScoreData && (
+                    <div className="rounded-md border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-amber-200">
+                      The stored description is incomplete, so score quality may be lower than usual.
+                    </div>
+                  )}
+                  {selected.description ? (
+                    <pre className="whitespace-pre-wrap">{selected.description}</pre>
+                  ) : (
+                    <p>No usable job description is stored for this listing yet.</p>
+                  )}
+                </div>
               )}
               {activeTab === "score breakdown" && (
                 selected.score_reasoning?.length ? (
                   <div className="space-y-3">
-                    {selected.score_label && (
-                      <p className="text-foreground">Score label: {selected.score_label}</p>
-                    )}
-                    <ul className="space-y-1">{selected.score_reasoning.map((r, i) => <li key={i}>• {r}</li>)}</ul>
+                    <div className="rounded-md border border-white/10 bg-black/20 px-3 py-3">
+                      <p className="font-display text-sm text-foreground">Why JARVIS gave this score</p>
+                      {selected.score_label && (
+                        <p className="mt-1 font-mono text-[11px] text-muted-foreground">Score label: {selected.score_label}</p>
+                      )}
+                      <ul className="mt-3 space-y-2">{selected.score_reasoning.map((r, i) => <li key={i}>• {r}</li>)}</ul>
+                    </div>
+                    <div
+                      className={cn(
+                        "rounded-md border px-3 py-3",
+                        selectedHasIncompleteScoreData
+                          ? "border-amber-400/20 bg-amber-400/10 text-amber-200"
+                          : "border-white/10 bg-black/20 text-muted-foreground"
+                      )}
+                    >
+                      <p className="font-display text-sm text-foreground">Score confidence context</p>
+                      <p className="mt-2 font-mono text-[11px]">{getScoreContextMessage(selected)}</p>
+                    </div>
                   </div>
                 ) : <p>No score breakdown available</p>
               )}

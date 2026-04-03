@@ -35,6 +35,9 @@ backend/.env
 backend/.env.*
 backend/*.db
 backend/uploads/
+/jarvis.db
+/dump.rdb
+/test-results/
 
 # Environment files
 .env

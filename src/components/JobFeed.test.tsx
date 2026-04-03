@@ -38,6 +38,9 @@ function createJob(overrides: Partial<Job> = {}): Job {
     url: "https://example.com/jobs/1",
     date_scraped: "2026-04-03T00:00:00.000Z",
     description: "This is a complete job description with responsibilities, qualifications, SQL work, dashboards, and stakeholder communication.".repeat(3),
+    enrichment_status: "ready",
+    enrichment_error: "",
+    scoring_ready: true,
     score: 82,
     score_label: "Good",
     score_reasoning: ["Strong SQL and analytics overlap with the current CV."],
@@ -56,7 +59,7 @@ describe("JobFeed scoring context", () => {
     fireEvent.click(screen.getByText("Data Analyst"));
 
     expect(screen.getByText("Why This Score Exists")).toBeInTheDocument();
-    expect(screen.getByText("This score is based on the stored job description and your current CV.")).toBeInTheDocument();
+    expect(screen.getByText("This score is based on a complete job description and your current CV.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("score breakdown"));
     expect(screen.getByText("Why JARVIS gave this score")).toBeInTheDocument();
@@ -67,6 +70,8 @@ describe("JobFeed scoring context", () => {
     renderJobFeed(
       createJob({
         description: "Short description",
+        enrichment_status: "partial",
+        scoring_ready: false,
         score: null,
         score_label: "Unscorable",
         score_reasoning: ["This job could not be scored because no usable job description was available for the listing."],
@@ -80,5 +85,6 @@ describe("JobFeed scoring context", () => {
 
     fireEvent.click(screen.getByText("description"));
     expect(screen.getByText("The stored description is incomplete, so score quality may be lower than usual.")).toBeInTheDocument();
+    expect(screen.getByText(/run scoring before generating an application/i)).toBeInTheDocument();
   });
 });

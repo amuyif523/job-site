@@ -7,6 +7,7 @@ import { ScoreRing } from "./ScoreRing";
 import { toast } from "@/hooks/use-toast";
 import { Search, Loader2, ExternalLink, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { canGenerateForJob, getGenerationBlockReason, getScoreContextMessage, hasIncompleteScoreData } from "@/lib/jobScoring";
 
 interface JobFeedProps {
   jobs: Job[];
@@ -27,33 +28,6 @@ const scoreLabelColors: Record<string, string> = {
   Poor: "#E11D48",
   Unscorable: "#6B7280",
 };
-const MIN_RELIABLE_DESCRIPTION_LENGTH = 200;
-
-function hasIncompleteScoreData(job: Job): boolean {
-  const description = job.description?.trim() || "";
-  const reasons = job.score_reasoning ?? [];
-  const warningText = `${reasons.join(" ")} ${(job.red_flags ?? []).join(" ")}`.toLowerCase();
-
-  return (
-    job.score_label === "Unscorable" ||
-    description.length < MIN_RELIABLE_DESCRIPTION_LENGTH ||
-    warningText.includes("no usable job description") ||
-    warningText.includes("missing job description") ||
-    warningText.includes("enrichment failed")
-  );
-}
-
-function getScoreContextMessage(job: Job): string {
-  if (job.score_label === "Unscorable") {
-    return "This job could not be scored because the listing data was too incomplete.";
-  }
-
-  if (hasIncompleteScoreData(job)) {
-    return "This score was generated from limited job data, so treat it as directional rather than final.";
-  }
-
-  return "This score is based on the stored job description and your current CV.";
-}
 
 export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreButtonLabel }: JobFeedProps) {
   const [search, setSearch] = useState("");
@@ -95,6 +69,8 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreBu
 
   const tabs = ["description", "score breakdown", "red flags", "notes"];
   const selectedHasIncompleteScoreData = selected ? hasIncompleteScoreData(selected) : false;
+  const selectedCanGenerate = selected ? canGenerateForJob(selected) : false;
+  const generationBlockReason = selected ? getGenerationBlockReason(selected) : "";
 
   return (
     <div className="animate-fade-up flex gap-0 h-[calc(100vh-64px)]">
@@ -245,7 +221,8 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreBu
                     </button>
                     <button
                       onClick={() => onGenerateForJob(selected)}
-                      className="px-5 py-2 rounded-md font-display text-xs font-semibold uppercase text-foreground transition-all hover:scale-[1.02] animate-glow-pulse"
+                      disabled={!selectedCanGenerate}
+                      className="px-5 py-2 rounded-md font-display text-xs font-semibold uppercase text-foreground transition-all hover:scale-[1.02] animate-glow-pulse disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
                       style={{ background: "linear-gradient(135deg, #8B5CF6, #3B82F6)" }}
                     >
                       ⚡ Generate Application
@@ -288,6 +265,11 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreBu
             <div className="max-h-[40vh] overflow-y-auto font-mono text-xs text-muted-foreground leading-relaxed">
               {activeTab === "description" && (
                 <div className="space-y-3">
+                  {!selectedCanGenerate && generationBlockReason && (
+                    <div className="rounded-md border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-amber-200">
+                      {generationBlockReason}
+                    </div>
+                  )}
                   {selectedHasIncompleteScoreData && (
                     <div className="rounded-md border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-amber-200">
                       The stored description is incomplete, so score quality may be lower than usual.

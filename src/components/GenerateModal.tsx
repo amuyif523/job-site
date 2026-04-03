@@ -7,6 +7,7 @@ import { ScoreRing } from "./ScoreRing";
 import { toast } from "@/hooks/use-toast";
 import { X, Loader2, Download, FileText, Mail, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { canGenerateForJob, getGenerationBlockReason } from "@/lib/jobScoring";
 
 interface GenerateModalProps {
   job: Job | null;
@@ -66,6 +67,9 @@ export function GenerateModal({ job, open, onClose }: GenerateModalProps) {
 
   if (!open || !job) return null;
 
+  const generationBlocked = !canGenerateForJob(job);
+  const generationBlockReason = getGenerationBlockReason(job);
+
   const steps = [
     { num: 1, label: "TEMPLATE" },
     { num: 2, label: "OPTIONS" },
@@ -111,6 +115,11 @@ export function GenerateModal({ job, open, onClose }: GenerateModalProps) {
           {/* Step 1: Template picker */}
           {step === 1 && (
             <div className="space-y-4">
+              {generationBlocked && (
+                <div className="rounded-md border border-amber-400/20 bg-amber-400/10 px-3 py-3 font-mono text-[11px] text-amber-200">
+                  {generationBlockReason}
+                </div>
+              )}
               {genCV && (
                 <div>
                   <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-2">CV TEMPLATE</p>
@@ -174,7 +183,8 @@ export function GenerateModal({ job, open, onClose }: GenerateModalProps) {
 
               <button
                 onClick={() => setStep(2)}
-                className="w-full py-3 rounded-md font-display font-semibold text-[13px] uppercase text-foreground transition-all hover:scale-[1.01]"
+                disabled={generationBlocked}
+                className="w-full py-3 rounded-md font-display font-semibold text-[13px] uppercase text-foreground transition-all hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
                 style={{ background: "linear-gradient(135deg, #8B5CF6, #3B82F6)", boxShadow: "0 0 20px rgba(139,92,246,0.35)" }}
               >
                 NEXT →

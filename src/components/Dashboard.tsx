@@ -7,6 +7,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { Loader2, Play, Upload } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { canGenerateForJob, getGenerationBlockReason, isReliableTopMatch } from "@/lib/jobScoring";
 
 interface DashboardProps {
   jobs: Job[];
@@ -150,23 +151,23 @@ function CVRecoveryState({
 export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
   const cvState = getCVUiState(cvData, false);
   const dashboardView = getDashboardView(cvState, jobs);
-  const scored = jobs.filter(j => j.score !== null);
+  const scored = jobs.filter(j => j.score !== null && isReliableTopMatch(j));
+  const trustedTopMatches = [...jobs]
+    .filter((job) => isReliableTopMatch(job))
+    .sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
+    .slice(0, 3);
   const kpis = [
     { label: "TOTAL JOBS", value: jobs.length },
-    { label: "HIGH MATCHES", value: jobs.filter(j => (j.score ?? 0) >= 80).length },
+    { label: "HIGH MATCHES", value: jobs.filter(j => isReliableTopMatch(j) && (j.score ?? 0) >= 80).length },
     { label: "APPLIED", value: jobs.filter(j => j.status === "applied").length },
     { label: "AVG SCORE", value: scored.length ? Math.round(scored.reduce((a, j) => a + (j.score ?? 0), 0) / scored.length) : 0 },
   ];
 
-  // Top matches: sort by score desc, take top 3 regardless of date. If fewer than 3 scored, fill with unscored
-  const sortedByScore = [...jobs].sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
-  const topMatches = sortedByScore.slice(0, 3);
-
   const dist = [
-    { range: "0–25", count: jobs.filter(j => j.score !== null && j.score <= 25).length, color: "#E11D48" },
-    { range: "26–50", count: jobs.filter(j => j.score !== null && j.score > 25 && j.score <= 50).length, color: "#8B5CF6" },
-    { range: "51–75", count: jobs.filter(j => j.score !== null && j.score > 50 && j.score <= 75).length, color: "#3B82F6" },
-    { range: "76–100", count: jobs.filter(j => j.score !== null && j.score > 75).length, color: "#10B981" },
+    { range: "0–25", count: jobs.filter(j => isReliableTopMatch(j) && j.score !== null && j.score <= 25).length, color: "#E11D48" },
+    { range: "26–50", count: jobs.filter(j => isReliableTopMatch(j) && j.score !== null && j.score > 25 && j.score <= 50).length, color: "#8B5CF6" },
+    { range: "51–75", count: jobs.filter(j => isReliableTopMatch(j) && j.score !== null && j.score > 50 && j.score <= 75).length, color: "#3B82F6" },
+    { range: "76–100", count: jobs.filter(j => isReliableTopMatch(j) && j.score !== null && j.score > 75).length, color: "#10B981" },
   ];
 
   const statusColor = (s: string) => {
@@ -246,7 +247,7 @@ export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
         <div>
           <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground mb-3">TOP MATCHES</p>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-            {topMatches.map(job => (
+            {trustedTopMatches.map(job => (
               <GlassCard key={job.id} className="flex h-full flex-col p-4 sm:p-5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="h-11 w-11 rounded-full flex items-center justify-center font-mono font-bold text-sm text-foreground shrink-0" style={{ background: "linear-gradient(135deg, #8B5CF6, #3B82F6)" }}>
@@ -261,13 +262,27 @@ export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
                 </span>
                 <button
                   onClick={() => onGenerateForJob(job)}
-                  className="mt-auto pt-4 w-full py-2 rounded-md font-display font-semibold text-[11px] uppercase text-foreground transition-all duration-150 hover:scale-[1.02]"
+                  disabled={!canGenerateForJob(job)}
+                  className="mt-auto pt-4 w-full py-2 rounded-md font-display font-semibold text-[11px] uppercase text-foreground transition-all duration-150 hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
                   style={{ background: "linear-gradient(135deg, #8B5CF6, #3B82F6)", boxShadow: "0 0 20px rgba(139,92,246,0.35)" }}
                 >
                   Generate Application →
                 </button>
+                {!canGenerateForJob(job) && (
+                  <p className="mt-2 font-mono text-[10px] text-amber-200">
+                    {getGenerationBlockReason(job)}
+                  </p>
+                )}
               </GlassCard>
             ))}
+            {trustedTopMatches.length === 0 && (
+              <GlassCard className="p-5 lg:col-span-2 2xl:col-span-3" hover={false}>
+                <p className="font-display text-lg font-semibold text-foreground">Top matches will appear after trustworthy scoring is ready</p>
+                <p className="mt-2 font-mono text-[11px] text-muted-foreground">
+                  JARVIS only promotes jobs here once they have a usable full description and a completed score. Run scoring after enrichment finishes, then review the Jobs view for any skipped listings.
+                </p>
+              </GlassCard>
+            )}
           </div>
         </div>
       ) : (

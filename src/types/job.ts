@@ -1,7 +1,7 @@
 export type JobStatus = "new" | "scored" | "selected" | "applied" | "interviewing" | "offered" | "rejected";
 
 export interface JobEvent {
-  type: "scraped" | "scored" | "selected" | "applied" | "interviewing" | "offered" | "rejected";
+  type: "scraped" | "enriched" | "scored" | "selected" | "applied" | "interviewing" | "offered" | "rejected";
   timestamp: string;
   score?: number;
   score_label?: string;
@@ -15,6 +15,9 @@ export interface Job {
   url: string;
   date_scraped: string;
   description: string;
+  enrichment_status: "pending" | "ready" | "enriched" | "partial" | "missing" | "failed";
+  enrichment_error: string;
+  scoring_ready: boolean;
   score: number | null;
   score_label: string | null;
   score_reasoning: string[] | null;

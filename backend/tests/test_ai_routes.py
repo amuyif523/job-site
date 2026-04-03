@@ -233,6 +233,8 @@ class AIRouteTests(unittest.TestCase):
             self.assertEqual(job.score, 91)
             self.assertEqual(job.score_label, "Excellent")
             self.assertEqual(job.status, "scored")
+            self.assertTrue(job.scoring_ready)
+            self.assertEqual(job.enrichment_status, "ready")
             self.assertIn("Strong Python and API overlap.", job.score_reasoning or "")
 
     def test_score_jobs_task_enriches_missing_descriptions_before_scoring(self) -> None:
@@ -271,22 +273,33 @@ class AIRouteTests(unittest.TestCase):
 
         with (
             patch.object(ai_router, "engine", self.engine),
-            patch.object(ai_router, "fetch_job_description_map", new=AsyncMock(return_value={11: "Detailed role requirements"})),
+            patch.object(
+                ai_router,
+                "fetch_job_description_map",
+                new=AsyncMock(
+                    return_value={
+                        11: "Detailed role requirements covering SQL, experimentation, stakeholder communication, dashboard delivery, forecasting, data quality ownership, and collaboration with engineering and product teams."  # noqa: E501
+                        * 2
+                    }
+                ),
+            ),
             patch.object(ai_router.llm_service, "get_score_from_ai", new=fake_score_from_ai),
         ):
             result = ai_router.score_jobs_task(1, [11])
 
         self.assertEqual(result["scored"], 1)
         self.assertEqual(result["unscorable"], 0)
-        self.assertEqual(captured["job_description"], "Detailed role requirements")
+        self.assertIn("Detailed role requirements", captured["job_description"])
 
         with Session(self.engine) as session:
             job = session.get(Job, 11)
             self.assertIsNotNone(job)
             assert job is not None
-            self.assertEqual(job.description, "Detailed role requirements")
+            self.assertIn("Detailed role requirements", job.description)
             self.assertEqual(job.score_label, "Good")
             self.assertEqual(job.score, 78)
+            self.assertEqual(job.enrichment_status, "enriched")
+            self.assertTrue(job.scoring_ready)
 
     def test_score_jobs_task_marks_job_unscorable_when_description_is_missing(self) -> None:
         with Session(self.engine) as session:
@@ -320,7 +333,7 @@ class AIRouteTests(unittest.TestCase):
 
         self.assertEqual(result["scored"], 0)
         self.assertEqual(result["unscorable"], 1)
-        self.assertIn("missing job description; scoring skipped", result["errors"][0])
+        self.assertIn("incomplete job description; scoring skipped", result["errors"][0])
 
         with Session(self.engine) as session:
             job = session.get(Job, 12)
@@ -329,9 +342,52 @@ class AIRouteTests(unittest.TestCase):
             self.assertIsNone(job.score)
             self.assertEqual(job.score_label, "Unscorable")
             self.assertEqual(job.status, "new")
+            self.assertFalse(job.scoring_ready)
+            self.assertEqual(job.enrichment_status, "missing")
             self.assertIn("no usable job description", (job.score_reasoning or "").lower())
             red_flags = json.loads(job.red_flags or "[]")
             self.assertTrue(any("job description" in flag.lower() for flag in red_flags))
+
+    def test_score_jobs_task_marks_short_descriptions_unscorable_when_enrichment_cannot_help(self) -> None:
+        with Session(self.engine) as session:
+            session.add(
+                CVData(
+                    user_id=1,
+                    filename="resume.pdf",
+                    extracted_text="RAW CV TEXT FOR SCORING",
+                    parsed_json="{}",
+                )
+            )
+            session.add(
+                Job(
+                    id=13,
+                    user_id=1,
+                    title="Analytics Engineer",
+                    company="Acme",
+                    location="Remote",
+                    url="https://example.com/jobs/13",
+                    description="Short listing",
+                )
+            )
+            session.commit()
+
+        with (
+            patch.object(ai_router, "engine", self.engine),
+            patch.object(ai_router, "fetch_job_description_map", new=AsyncMock(return_value={})),
+            patch.object(ai_router.llm_service, "get_score_from_ai", new=AsyncMock(side_effect=AssertionError("should not score"))),
+        ):
+            result = ai_router.score_jobs_task(1, [13])
+
+        self.assertEqual(result["scored"], 0)
+        self.assertEqual(result["unscorable"], 1)
+
+        with Session(self.engine) as session:
+            job = session.get(Job, 13)
+            self.assertIsNotNone(job)
+            assert job is not None
+            self.assertEqual(job.enrichment_status, "partial")
+            self.assertFalse(job.scoring_ready)
+            self.assertIn("too short to score reliably", (job.score_reasoning or "").lower())
 
     def test_score_all_returns_clear_error_when_no_provider_is_configured(self) -> None:
         with patch.object(
@@ -435,6 +491,56 @@ class AIRouteTests(unittest.TestCase):
         assert response.error is not None
         self.assertIn("could not be decoded", response.error)
         self.assertNotIn(self.current_user.id, ai_router.ACTIVE_SCORE_TASKS)
+
+    def test_generate_documents_rejects_jobs_without_trustworthy_scores(self) -> None:
+        with Session(self.engine) as session:
+            session.add(
+                Job(
+                    id=20,
+                    user_id=1,
+                    title="Backend Engineer",
+                    company="Acme",
+                    location="Remote",
+                    url="https://example.com/jobs/20",
+                    description="Short listing",
+                    score=None,
+                    score_label=None,
+                    scoring_ready=False,
+                    enrichment_status="partial",
+                )
+            )
+            session.commit()
+
+        with Session(self.engine) as session, self.assertRaises(ai_router.HTTPException) as exc_info:
+            ai_router.generate_documents(job_id=20, current_user=self.current_user, session=session)
+
+        self.assertEqual(exc_info.exception.status_code, 409)
+        self.assertEqual(exc_info.exception.detail, ai_router.GENERATION_BLOCK_MESSAGE)
+
+    def test_generate_documents_allows_scored_jobs_with_complete_descriptions(self) -> None:
+        description = "Python APIs and SQL systems " * 20
+        with Session(self.engine) as session:
+            session.add(
+                Job(
+                    id=21,
+                    user_id=1,
+                    title="Backend Engineer",
+                    company="Acme",
+                    location="Remote",
+                    url="https://example.com/jobs/21",
+                    description=description,
+                    score=91,
+                    score_label="Excellent",
+                    scoring_ready=True,
+                    enrichment_status="ready",
+                )
+            )
+            session.commit()
+
+        with Session(self.engine) as session:
+            response = ai_router.generate_documents(job_id=21, current_user=self.current_user, session=session)
+
+        self.assertIn("/downloads/cv_21_", response.cv_url)
 
 
 if __name__ == "__main__":

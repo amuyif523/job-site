@@ -23,7 +23,11 @@ from dependencies import get_current_user
 from database import engine, get_session
 from models import CVData, Job, UserPublic
 from services import llm_service
-from services.job_enrichment import fetch_job_description_map
+from services.job_enrichment import (
+    fetch_job_description_map,
+    has_high_fidelity_description,
+    normalize_job_description,
+)
 from services.llm_service import ProviderError
 from worker import celery_app
 
@@ -89,6 +93,9 @@ class TaskStatusResponse(BaseModel):
 
 
 UNSCORABLE_SCORE_LABEL = "Unscorable"
+GENERATION_BLOCK_MESSAGE = (
+    "This job is not ready for application generation yet. Run scoring on a complete job description first."
+)
 
 
 def _build_score_progress(
@@ -196,14 +203,54 @@ def _append_job_event(row: Job, event_type: str, *, score: int | None = None, sc
     row.events = json.dumps(events)
 
 
+def _set_job_enrichment_state(
+    row: Job,
+    *,
+    status: str,
+    error: str = "",
+    scoring_ready: bool,
+) -> None:
+    row.enrichment_status = status
+    row.enrichment_error = error
+    row.scoring_ready = scoring_ready
+
+
+def _refresh_job_scoring_readiness(
+    row: Job,
+    *,
+    prefer_enriched_label: bool = False,
+    error: str = "",
+) -> None:
+    description = normalize_job_description(row.description or "")
+    row.description = description
+
+    if has_high_fidelity_description(description):
+        status_value = "enriched" if prefer_enriched_label else "ready"
+        _set_job_enrichment_state(row, status=status_value, error="", scoring_ready=True)
+        return
+
+    if description:
+        status_value = "failed" if error else "partial"
+        _set_job_enrichment_state(row, status=status_value, error=error, scoring_ready=False)
+        return
+
+    status_value = "failed" if error else "missing"
+    _set_job_enrichment_state(row, status=status_value, error=error, scoring_ready=False)
+
+
 def _mark_job_unscorable(row: Job, reason: str) -> None:
     row.score = None
     row.score_label = UNSCORABLE_SCORE_LABEL
+    row.scoring_ready = False
     _set_json_list(row, "score_reasoning", [reason])
     red_flags = _load_json_list(row.red_flags)
     if reason not in red_flags:
         red_flags.append(reason)
     _set_json_list(row, "red_flags", red_flags)
+
+
+def _job_can_generate(row: Job) -> bool:
+    return bool(row.scoring_ready and row.score is not None and row.score_label != UNSCORABLE_SCORE_LABEL)
 
 
 def _parse_stored_cv_payload(raw_payload: str) -> dict:
@@ -312,6 +359,9 @@ def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dic
         jobs_failed: int = 0,
         jobs_unscorable: int = 0,
     ) -> None:
+        task_id = getattr(getattr(self, "request", None), "id", None)
+        if not task_id:
+            return
         self.update_state(
             state="PROGRESS",
             meta=_build_score_progress(
@@ -350,7 +400,11 @@ def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dic
         report_progress(phase="running", total_jobs=total_jobs)
 
         jobs_needing_description = [
-            row for row in job_rows if not (row.description or "").strip() and (row.url or "").strip() and row.id is not None
+            row
+            for row in job_rows
+            if not has_high_fidelity_description(row.description or "")
+            and (row.url or "").strip()
+            and row.id is not None
         ]
         enriched_descriptions: dict[int, str] = {}
         enrichment_error: str | None = None
@@ -373,20 +427,33 @@ def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dic
 
         for row in job_rows:
             job_id = int(row.id or 0)
-            if row.id is not None and not (row.description or "").strip():
+            enriched_this_job = False
+            if row.id is not None and not has_high_fidelity_description(row.description or ""):
                 enriched_description = enriched_descriptions.get(int(row.id), "").strip()
                 if enriched_description:
                     row.description = enriched_description
+                    _append_job_event(row, "enriched")
+                    enriched_this_job = True
+
+            _refresh_job_scoring_readiness(
+                row,
+                prefer_enriched_label=enriched_this_job,
+                error=enrichment_error or "",
+            )
 
             job_description = (row.description or "").strip()
-            if not job_description:
+            if not row.scoring_ready:
                 reason = "This job could not be scored because no usable job description was available for the listing."
                 if enrichment_error:
                     reason = f"{reason} Enrichment failed: {enrichment_error}"
+                elif job_description:
+                    reason = (
+                        "This job could not be scored because the stored job description is too short to score reliably."
+                    )
                 _mark_job_unscorable(row, reason)
                 session.add(row)
                 unscorable_count += 1
-                errors.append(f"job_id={job_id}: missing job description; scoring skipped")
+                errors.append(f"job_id={job_id}: incomplete job description; scoring skipped")
                 report_progress(
                     phase="running",
                     total_jobs=total_jobs,
@@ -621,8 +688,24 @@ def generate_documents(
     job_id: int,
     body: GenerateRequest | None = Body(default=None),
     current_user: UserPublic = Depends(get_current_user),
+    session: Session = Depends(get_session),
 ) -> GenerateResponse:
-    req = body or GenerateRequest()
+    job = session.exec(
+        select(Job).where(Job.id == job_id, Job.user_id == current_user.id)
+    ).first()
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+
+    _refresh_job_scoring_readiness(job, error=job.enrichment_error or "")
+    session.add(job)
+    session.commit()
+    if not _job_can_generate(job):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=GENERATION_BLOCK_MESSAGE,
+        )
+
+    req = body if isinstance(body, GenerateRequest) else GenerateRequest()
     lang = req.language.strip().lower().replace(" ", "-") or "english"
     template = req.template_choice.strip().lower().replace(" ", "-") or "modern"
 

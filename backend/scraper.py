@@ -17,6 +17,7 @@ from kombu.exceptions import OperationalError
 from database import engine
 from dependencies import get_current_user
 from models import Job, UserPublic
+from services.job_enrichment import normalize_job_description
 from worker import celery_app
 
 router = APIRouter()
@@ -260,6 +261,10 @@ async def scrape_jobteaser(
                         company=job["company"],
                         location=job["location"],
                         url=job["url"],
+                        description=normalize_job_description(""),
+                        enrichment_status="pending",
+                        enrichment_error="",
+                        scoring_ready=False,
                         status="new",
                         date_scraped=datetime.fromisoformat(now),
                     )

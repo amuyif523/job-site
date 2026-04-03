@@ -8,7 +8,8 @@ from typing import Any
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError, async_playwright
 
 MAX_DESCRIPTION_LENGTH = 12000
-MIN_DESCRIPTION_LENGTH = 160
+MIN_SCORING_DESCRIPTION_LENGTH = 200
+MIN_DESCRIPTION_LENGTH = MIN_SCORING_DESCRIPTION_LENGTH
 JOB_DESCRIPTION_SELECTORS = (
     "[data-testid*='description']",
     "[class*='description']",
@@ -75,6 +76,14 @@ def _pick_best_candidate(candidates: Sequence[str]) -> str:
         return ""
     usable.sort(key=_score_candidate, reverse=True)
     return usable[0][:MAX_DESCRIPTION_LENGTH]
+
+
+def normalize_job_description(value: str) -> str:
+    return _collapse_whitespace(value)
+
+
+def has_high_fidelity_description(value: str) -> bool:
+    return len(normalize_job_description(value)) >= MIN_SCORING_DESCRIPTION_LENGTH
 
 
 async def _collect_selector_candidates(page: Page) -> list[str]:

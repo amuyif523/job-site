@@ -47,7 +47,10 @@ function createJob(overrides: Partial<Job> = {}): Job {
     location: "Remote",
     url: "https://example.com/jobs/1",
     date_scraped: "2026-04-02T00:00:00.000Z",
-    description: "Build product experiences.",
+    description: "Build product experiences with cross-functional collaboration, strong product judgment, TypeScript systems, metrics ownership, and end-to-end delivery across engineering teams.".repeat(2),
+    enrichment_status: "ready",
+    enrichment_error: "",
+    scoring_ready: true,
     score: 88,
     score_label: "Excellent",
     score_reasoning: ["Strong product fit"],
@@ -100,6 +103,21 @@ describe("Dashboard state branching", () => {
     expect(screen.getByText("TOP MATCHES")).toBeInTheDocument();
     expect(screen.getByText("Frontend Engineer")).toBeInTheDocument();
     expect(screen.queryByText("Step 2: Find Opportunities")).not.toBeInTheDocument();
+  });
+
+  it("does not promote incomplete jobs as top matches", () => {
+    renderDashboard(
+      {
+        has_cv: true,
+        status: "ready",
+        readiness: { dashboard: true, scoring: true, parsed_payload: true, raw_text: true },
+        parsed_json: { summary: "Experienced engineer", skills: ["React", "TypeScript"] },
+        suggestions: [],
+      },
+      [createJob({ score: 91, scoring_ready: false, enrichment_status: "partial", description: "short" })]
+    );
+
+    expect(screen.getByText("Top matches will appear after trustworthy scoring is ready")).toBeInTheDocument();
   });
 
   it("renders recovery guidance for invalid or empty CV payloads", () => {

@@ -12,6 +12,7 @@ from sqlmodel import Session, select
 from database import get_session
 from dependencies import get_current_user
 from models import Job, UserPublic
+from services.job_enrichment import has_high_fidelity_description, normalize_job_description
 
 router = APIRouter()
 
@@ -47,6 +48,14 @@ class JobCreate(BaseModel):
     description: Optional[str] = ""
 
 
+def _derive_manual_job_readiness(description: str) -> tuple[str, bool]:
+    if has_high_fidelity_description(description):
+        return ("ready", True)
+    if description:
+        return ("partial", False)
+    return ("missing", False)
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("")
@@ -80,13 +89,17 @@ def create_job(
     current_user: UserPublic = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
+    normalized_description = normalize_job_description(body.description or "")
+    enrichment_status, scoring_ready = _derive_manual_job_readiness(normalized_description)
     row = Job(
         user_id=current_user.id,
         title=body.title,
         company=body.company,
         location=body.location or "",
         url=body.url or "",
-        description=body.description or "",
+        description=normalized_description,
+        enrichment_status=enrichment_status,
+        scoring_ready=scoring_ready,
     )
     session.add(row)
     session.commit()

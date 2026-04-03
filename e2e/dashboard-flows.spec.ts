@@ -32,7 +32,11 @@ type MockJob = {
   url: string;
   date_scraped: string;
   description: string;
+  enrichment_status: "pending" | "ready" | "enriched" | "partial" | "missing" | "failed";
+  enrichment_error: string;
+  scoring_ready: boolean;
   score: number | null;
+  score_label: string | null;
   score_reasoning: string[] | null;
   red_flags: string[] | null;
   status: "new" | "scored";
@@ -103,7 +107,11 @@ function newJob(overrides: Partial<MockJob> = {}): MockJob {
     url: "https://example.com/jobs/1",
     date_scraped: "2026-04-02T00:00:00.000Z",
     description: "Build polished React product experiences.",
+    enrichment_status: "ready",
+    enrichment_error: "",
+    scoring_ready: true,
     score: null,
+    score_label: null,
     score_reasoning: null,
     red_flags: null,
     status: "new",
@@ -286,7 +294,12 @@ async function mockAppApi(page: Page, state: MockState) {
         job.id === 1
           ? {
               ...job,
+              description: "Build polished React product experiences with TypeScript, design systems, testing, and collaboration across product and engineering.".repeat(2),
+              enrichment_status: "enriched",
+              enrichment_error: "",
+              scoring_ready: true,
               score: 91,
+              score_label: "Excellent",
               score_reasoning: ["Strong React and product fit"],
               status: "scored",
             }
@@ -296,13 +309,46 @@ async function mockAppApi(page: Page, state: MockState) {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
+          body: JSON.stringify({
+            task_id: "score-task-1",
+            status: "success",
+            progress: {
+              phase: "completed",
+              total_jobs: 1,
+              jobs_scored: 1,
+              jobs_failed: 0,
+              jobs_unscorable: 0,
+            },
+            result: {
+              scored: 1,
+              unscorable: 0,
+              errors: [],
+            },
+          }),
+        });
+      return;
+    }
+
+    if (url.pathname.startsWith("/api/generate/") && request.method() === "POST") {
+      const jobId = Number(url.pathname.split("/").pop());
+      const job = state.jobs.find((item) => item.id === jobId);
+      if (!job || !job.scoring_ready || job.score === null || job.score_label === "Unscorable") {
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            detail: "This job is not ready for application generation yet. Run scoring on a complete job description first.",
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
         body: JSON.stringify({
-          task_id: "score-task-1",
-          status: "SUCCESS",
-          result: {
-            scored: 1,
-            errors: [],
-          },
+          cv_url: `/downloads/cv_${jobId}_modern_english.pdf`,
+          cover_letter_url: `/downloads/cover_${jobId}_modern_english.pdf`,
         }),
       });
       return;
@@ -392,8 +438,8 @@ test("dashboard shows top matches after a valid CV is loaded", async ({ page }) 
   const state: MockState = {
     latestCV: readyCv(),
     jobs: [
-      newJob({ id: 1, title: "Frontend Engineer", score: 88, status: "scored", score_reasoning: ["Great fit"] }),
-      newJob({ id: 2, title: "Product Engineer", company: "Nova", score: 81, status: "scored", score_reasoning: ["Strong fit"] }),
+      newJob({ id: 1, title: "Frontend Engineer", score: 88, score_label: "Excellent", status: "scored", score_reasoning: ["Great fit"] }),
+      newJob({ id: 2, title: "Product Engineer", company: "Nova", score: 81, score_label: "Good", status: "scored", score_reasoning: ["Strong fit"] }),
     ],
     scoreStatusCalls: 0,
   };
@@ -404,6 +450,31 @@ test("dashboard shows top matches after a valid CV is loaded", async ({ page }) 
   await expect(page.getByText("TOP MATCHES")).toBeVisible();
   await expect(page.getByText("Frontend Engineer")).toBeVisible();
   await expect(page.getByText("Product Engineer")).toBeVisible();
+});
+
+test("dashboard waits for trustworthy scoring before showing top matches", async ({ page }) => {
+  const state: MockState = {
+    latestCV: readyCv(),
+    jobs: [
+      newJob({
+        id: 1,
+        title: "Frontend Engineer",
+        description: "short listing",
+        enrichment_status: "partial",
+        scoring_ready: false,
+        score: 88,
+        score_label: "Excellent",
+        status: "scored",
+        score_reasoning: ["Directional only"],
+      }),
+    ],
+    scoreStatusCalls: 0,
+  };
+
+  await mockAppApi(page, state);
+  await page.goto("/");
+
+  await expect(page.getByText("Top matches will appear after trustworthy scoring is ready")).toBeVisible();
 });
 
 test("score-all works after uploading a CV", async ({ page }) => {
@@ -432,6 +503,72 @@ test("score-all works after uploading a CV", async ({ page }) => {
 
   await expect(page.getByText("91")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText("scored")).toBeVisible();
+});
+
+test("upload, scrape, score, review, and generate application flows end to end", async ({ page }) => {
+  const scrapedJobs = [
+    newJob({
+      id: 1,
+      title: "Frontend Engineer",
+      company: "Acme",
+      description: "",
+      enrichment_status: "pending",
+      scoring_ready: false,
+      score: null,
+      score_label: null,
+      status: "new",
+    }),
+  ];
+  const state: MockState = {
+    latestCV: {
+      has_cv: false,
+      status: "no_cv",
+      parsed_json: {},
+      suggestions: [],
+    },
+    jobs: [],
+    scoreStatusCalls: 0,
+    scrapeStatusCalls: 0,
+    scrapeStatusSequence: [
+      scrapeStatus("running", scrapeProgress("extracting_jobs", { page: 1, jobs_found: 1 })),
+      scrapeStatus(
+        "success",
+        scrapeProgress("completed", { page: 1, jobs_found: 1, jobs_saved: 1 }),
+        {
+          result: {
+            saved: 1,
+            user_id: 1,
+            source: "JobTeaser",
+            target_role: "Engineer",
+            jobs_found: 1,
+            jobs_saved: 1,
+            progress: scrapeProgress("completed", { page: 1, jobs_found: 1, jobs_saved: 1 }),
+          },
+        }
+      ),
+    ],
+    jobsAfterScrape: scrapedJobs,
+  };
+
+  await mockAppApi(page, state);
+  await page.goto("/");
+
+  await uploadPdf(page, "pipeline.pdf");
+  await page.getByRole("button", { name: "Scrape" }).click();
+  await page.waitForTimeout(3200);
+  await expect(page.getByText("Last scrape saved 1 job")).toBeVisible();
+
+  await page.getByRole("button", { name: "Jobs" }).click();
+  await page.getByRole("button", { name: "Score All" }).click();
+  await expect(page.getByText("91")).toBeVisible({ timeout: 10_000 });
+
+  await page.getByText("Frontend Engineer").click();
+  await expect(page.getByText("Why This Score Exists")).toBeVisible();
+  await page.getByRole("button", { name: /generate application/i }).click();
+  await expect(page.getByText("GENERATE APPLICATION")).toBeVisible();
+  await page.getByRole("button", { name: /next/i }).click();
+  await page.getByRole("button", { name: /generate/i }).click();
+  await expect(page.getByText("Documents Ready!")).toBeVisible();
 });
 
 test("scrape success shows progress and saves new jobs", async ({ page }) => {

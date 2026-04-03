@@ -28,6 +28,7 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { Progress } from "@/components/ui/progress";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
+import { canGenerateForJob, getGenerationBlockReason } from "@/lib/jobScoring";
 import { cn } from "@/lib/utils";
 
 const ACTIVE_SCORE_TASK_KEY = "jarvis_active_score_task_id";
@@ -615,6 +616,19 @@ export default function Index() {
     }
   };
 
+  const handleGenerateJob = (job: Job) => {
+    if (!canGenerateForJob(job)) {
+      toast({
+        title: "Job not ready for generation",
+        description: getGenerationBlockReason(job),
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setGenerateJob(job);
+  };
+
   return (
     <ProtectedRoute
       isAuthenticated={isAuthenticated}
@@ -686,12 +700,12 @@ export default function Index() {
               />
 
               {activeSection === "dashboard" && (
-                <Dashboard jobs={jobs} cvData={cvData ?? null} onGenerateForJob={j => setGenerateJob(j)} />
+                <Dashboard jobs={jobs} cvData={cvData ?? null} onGenerateForJob={handleGenerateJob} />
               )}
               {activeSection === "jobs" && (
                 <JobFeed
                   jobs={jobs}
-                  onGenerateForJob={j => setGenerateJob(j)}
+                  onGenerateForJob={handleGenerateJob}
                   onScoreAll={() => {
                     if (!isScoring) {
                       scoreMutation.mutate();

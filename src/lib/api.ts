@@ -86,6 +86,25 @@ export interface TaskQueuedResponse {
   message: string;
 }
 
+export interface ScrapeTaskProgress {
+  phase: "queued" | "launching_browser" | "loading_page" | "extracting_jobs" | "saving_jobs" | "completed" | "failed";
+  page: number;
+  jobs_found: number;
+  jobs_saved: number;
+  target_role: string;
+  source: string;
+}
+
+export interface ScrapeTaskResult {
+  saved: number;
+  user_id: number;
+  source: string;
+  target_role: string;
+  jobs_found: number;
+  jobs_saved: number;
+  progress: ScrapeTaskProgress;
+}
+
 export interface ScoreTaskResult {
   scored?: number;
   errors?: string[];
@@ -95,6 +114,14 @@ export interface TaskStatusResponse {
   task_id: string;
   status: string;
   result?: ScoreTaskResult;
+  error?: string | null;
+}
+
+export interface ScrapeTaskStatusResponse {
+  task_id: string;
+  status: "queued" | "running" | "retrying" | "success" | "failure";
+  progress: ScrapeTaskProgress;
+  result?: ScrapeTaskResult | null;
   error?: string | null;
 }
 
@@ -180,7 +207,7 @@ export async function runScraper(): Promise<TaskQueuedResponse> {
   return res.json();
 }
 
-export async function fetchScrapeStatus(taskId: string): Promise<TaskStatusResponse> {
+export async function fetchScrapeStatus(taskId: string): Promise<ScrapeTaskStatusResponse> {
   const res = await apiFetch(`/api/scrape/status?task_id=${encodeURIComponent(taskId)}`);
   if (!res.ok) await throwApiError(res, "Failed to fetch scraper task status");
   return res.json();

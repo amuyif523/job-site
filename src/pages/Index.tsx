@@ -161,6 +161,8 @@ export default function Index() {
         onCollapsedChange={setSidebarCollapsed}
         onNavigate={setActiveSection}
         onOpenSettings={() => setSettingsOpen(true)}
+        userId={user?.id ?? null}
+        targetRole={user?.target_role ?? ""}
       />
 
       {/* Top-right: CV status + Profile */}

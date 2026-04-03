@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import Index from "@/pages/Index";
@@ -121,6 +121,11 @@ const fetchJobsMock = vi.mocked(fetchJobs);
 const fetchLatestCVMock = vi.mocked(fetchLatestCV);
 const fetchScoreAllStatusMock = vi.mocked(fetchScoreAllStatus);
 const scoreAllMock = vi.mocked(scoreAll);
+const USER_ID = 1;
+
+function scopedKey(baseKey: string, userId = USER_ID) {
+  return `${baseKey}:${userId}`;
+}
 
 function renderIndex() {
   const queryClient = new QueryClient({
@@ -139,6 +144,8 @@ function renderIndex() {
 
 describe("Index score-all queue behavior", () => {
   beforeEach(() => {
+    vi.useRealTimers();
+    localStorage.clear();
     toastMock.mockReset();
     fetchJobsMock.mockReset();
     fetchLatestCVMock.mockReset();
@@ -209,6 +216,9 @@ describe("Index score-all queue behavior", () => {
       expect(fetchScoreAllStatusMock).toHaveBeenCalledWith("score-task-1");
     });
 
+    expect(screen.getByText("Last score run completed")).toBeInTheDocument();
+    expect(screen.getByText("Scored")).toBeInTheDocument();
+
     await waitFor(() => {
       expect(toastMock).toHaveBeenCalledWith({
         title: "Scoring complete",
@@ -249,5 +259,98 @@ describe("Index score-all queue behavior", () => {
     await waitFor(() => {
       expect(screen.getByText("Scoring 1/3")).toBeInTheDocument();
     });
+
+    expect(screen.getByText("Scoring jobs")).toBeInTheDocument();
+    expect(screen.getByText("Remaining")).toBeInTheDocument();
+  });
+
+  it("restores an active score task after refresh and reconnects polling", async () => {
+    localStorage.setItem(scopedKey("jarvis_active_score_task_id"), "score-task-restored");
+    localStorage.setItem(
+      scopedKey("jarvis_active_score_progress"),
+      JSON.stringify({
+        phase: "running",
+        total_jobs: 4,
+        jobs_scored: 1,
+        jobs_failed: 0,
+        jobs_unscorable: 0,
+      })
+    );
+
+    fetchScoreAllStatusMock.mockResolvedValue({
+      task_id: "score-task-restored",
+      status: "running",
+      progress: {
+        phase: "running",
+        total_jobs: 4,
+        jobs_scored: 2,
+        jobs_failed: 0,
+        jobs_unscorable: 1,
+      },
+      result: undefined,
+      error: null,
+    });
+
+    renderIndex();
+
+    await waitFor(() => {
+      expect(fetchScoreAllStatusMock).toHaveBeenCalledWith("score-task-restored");
+    });
+
+    expect(screen.getByText("Scoring jobs")).toBeInTheDocument();
+    expect(screen.getByText("75%")).toBeInTheDocument();
+    expect(screen.getByText("Skipped")).toBeInTheDocument();
+  });
+
+  it("keeps the score task visible when polling temporarily fails and retries with backoff", async () => {
+    vi.useFakeTimers();
+    localStorage.setItem(scopedKey("jarvis_active_score_task_id"), "score-task-backoff");
+    localStorage.setItem(
+      scopedKey("jarvis_active_score_progress"),
+      JSON.stringify({
+        phase: "running",
+        total_jobs: 5,
+        jobs_scored: 1,
+        jobs_failed: 0,
+        jobs_unscorable: 0,
+      })
+    );
+
+    fetchScoreAllStatusMock
+      .mockRejectedValueOnce(new Error("temporary outage"))
+      .mockResolvedValueOnce({
+        task_id: "score-task-backoff",
+        status: "running",
+        progress: {
+          phase: "running",
+          total_jobs: 5,
+          jobs_scored: 3,
+          jobs_failed: 1,
+          jobs_unscorable: 0,
+        },
+        result: undefined,
+        error: null,
+      });
+
+    await act(async () => {
+      renderIndex();
+      await Promise.resolve();
+    });
+
+    expect(fetchScoreAllStatusMock).toHaveBeenCalledWith("score-task-backoff");
+
+    expect(screen.getByText(/Status temporarily unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText("Scoring jobs")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+      await Promise.resolve();
+    });
+
+    expect(fetchScoreAllStatusMock).toHaveBeenCalledTimes(2);
+
+    expect(screen.queryByText(/Status temporarily unavailable/i)).not.toBeInTheDocument();
+    expect(screen.getByText("80%")).toBeInTheDocument();
+    expect(screen.getByText("Failed")).toBeInTheDocument();
   });
 });

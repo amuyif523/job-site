@@ -19,6 +19,13 @@ const statusColors: Record<string, string> = {
   new: "#6B7280", scored: "#06B6D4", selected: "#3B82F6", applied: "#10B981", interviewing: "#F59E0B", offered: "#8B5CF6", rejected: "#E11D48",
 };
 const allStatuses = ["all", "new", "scored", "selected", "applied", "interviewing", "offered", "rejected"];
+const scoreLabelColors: Record<string, string> = {
+  Excellent: "#10B981",
+  Good: "#3B82F6",
+  Fair: "#F59E0B",
+  Poor: "#E11D48",
+  Unscorable: "#6B7280",
+};
 
 export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring }: JobFeedProps) {
   const [search, setSearch] = useState("");
@@ -56,6 +63,7 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring }: JobFe
   });
 
   const scoreColor = (s: number | null) => s === null ? "#6B7280" : s >= 80 ? "#10B981" : s >= 50 ? "#F59E0B" : "#E11D48";
+  const scoreLabelColor = (label: string | null) => (label ? scoreLabelColors[label] || "#6B7280" : "#6B7280");
 
   const tabs = ["description", "score breakdown", "red flags", "notes"];
 
@@ -132,7 +140,7 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring }: JobFe
               </div>
               <div className="flex flex-col items-end gap-1 shrink-0">
                 <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded-full border" style={{ color: scoreColor(job.score), borderColor: scoreColor(job.score) + "4D", background: scoreColor(job.score) + "26" }}>
-                  {job.score ?? "—"}
+                  {job.score ?? (job.score_label === "Unscorable" ? "skip" : "—")}
                 </span>
                 <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-full" style={{ color: statusColors[job.status], background: statusColors[job.status] + "26" }}>
                   {job.status}
@@ -171,6 +179,18 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring }: JobFe
                       </a>
                     )}
                   </p>
+                  {selected.score_label && (
+                    <p
+                      className="mt-2 inline-flex w-fit rounded-full border px-2 py-1 font-mono text-[10px] uppercase tracking-wide"
+                      style={{
+                        color: scoreLabelColor(selected.score_label),
+                        borderColor: scoreLabelColor(selected.score_label) + "4D",
+                        background: scoreLabelColor(selected.score_label) + "20",
+                      }}
+                    >
+                      {selected.score_label}
+                    </p>
+                  )}
                   {/* Action buttons */}
                   <div className="flex gap-2 mt-3">
                     <button
@@ -223,11 +243,20 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring }: JobFe
 
             <div className="max-h-[40vh] overflow-y-auto font-mono text-xs text-muted-foreground leading-relaxed">
               {activeTab === "description" && (
-                <pre className="whitespace-pre-wrap">{selected.description}</pre>
+                selected.description ? (
+                  <pre className="whitespace-pre-wrap">{selected.description}</pre>
+                ) : (
+                  <p>No usable job description is stored for this listing yet.</p>
+                )
               )}
               {activeTab === "score breakdown" && (
                 selected.score_reasoning?.length ? (
-                  <ul className="space-y-1">{selected.score_reasoning.map((r, i) => <li key={i}>• {r}</li>)}</ul>
+                  <div className="space-y-3">
+                    {selected.score_label && (
+                      <p className="text-foreground">Score label: {selected.score_label}</p>
+                    )}
+                    <ul className="space-y-1">{selected.score_reasoning.map((r, i) => <li key={i}>• {r}</li>)}</ul>
+                  </div>
                 ) : <p>No score breakdown available</p>
               )}
               {activeTab === "red flags" && (

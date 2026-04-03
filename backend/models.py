@@ -61,6 +61,7 @@ class Job(SQLModel, table=True):
     date_scraped: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     description: str = Field(default="")
     score: Optional[float] = Field(default=None)
+    score_label: Optional[str] = Field(default=None)
     score_reasoning: Optional[str] = Field(default=None)
     red_flags: Optional[str] = Field(default=None)
     status: str = Field(default="new")

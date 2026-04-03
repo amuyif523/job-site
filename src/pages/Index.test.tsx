@@ -152,6 +152,7 @@ describe("Index score-all queue behavior", () => {
         date_scraped: "2026-04-02T00:00:00.000Z",
         description: "Python APIs",
         score: null,
+        score_label: null,
         score_reasoning: null,
         red_flags: null,
         status: "new",

@@ -7,6 +7,7 @@ import json
 from typing import Any
 
 from google import genai
+from google.genai import errors as gemini_errors
 
 from anthropic import APIError as AnthropicAPIError
 from anthropic import APIStatusError as AnthropicAPIStatusError
@@ -40,6 +41,18 @@ def _get_gemini_client() -> genai.Client:
     if not api_key:
         raise AuthenticationError("Missing backend Gemini API key. Set GEMINI_API_KEY.")
     return genai.Client(api_key=api_key)
+
+
+def get_scoring_provider_name() -> str:
+    if get_gemini_api_key():
+        return "gemini"
+    if get_openai_api_key():
+        return "openai"
+    if get_anthropic_api_key():
+        return "anthropic"
+    raise AuthenticationError(
+        "Missing backend model provider key. Set GEMINI_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY."
+    )
 
 
 def _status_from_score(score: int) -> str:
@@ -280,25 +293,32 @@ async def get_score_from_ai(
     if not cv_text.strip():
         raise ProviderError("CV text is empty and cannot be scored")
 
-    anthropic_key = get_anthropic_api_key()
-    openai_key = get_openai_api_key()
+    provider = get_scoring_provider_name()
 
-    if not anthropic_key and not openai_key:
-        raise AuthenticationError("Missing backend model provider key. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.")
+    if provider == "gemini":
+        return await _score_with_gemini(
+            cv_text=cv_text,
+            job_description=job_description,
+        )
 
-    if anthropic_key:
+    if provider == "openai":
+        return await _score_with_openai(
+            api_key=get_openai_api_key(),
+            model=get_openai_model(),
+            cv_text=cv_text,
+            job_description=job_description,
+        )
+
+    if provider == "anthropic":
         return await _score_with_anthropic(
-            api_key=anthropic_key,
+            api_key=get_anthropic_api_key(),
             model=get_anthropic_model(),
             cv_text=cv_text,
             job_description=job_description,
         )
 
-    return await _score_with_openai(
-        api_key=openai_key,
-        model=get_openai_model(),
-        cv_text=cv_text,
-        job_description=job_description,
+    raise AuthenticationError(
+        "Missing backend model provider key. Set GEMINI_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY."
     )
 
 
@@ -348,6 +368,48 @@ async def _score_with_openai(
         raise ProviderError("Model returned an invalid score format") from exc
     finally:
         # Keep the coroutine scheduling point in place for large batches.
+        await asyncio.sleep(0)
+
+
+async def _score_with_gemini(
+    cv_text: str,
+    job_description: str,
+) -> dict[str, Any]:
+    client = _get_gemini_client()
+    prompt = (
+        "Score this CV against the job description.\n"
+        "Rules:\n"
+        "- compatibility_score must be an integer from 0 to 100.\n"
+        "- match_status must be one of: Excellent, Good, Fair, Poor.\n"
+        "- reasoning must be a concise explanation (max 2 sentences).\n"
+        "- Return JSON with exactly these keys: compatibility_score, match_status, reasoning.\n"
+        "- No markdown, no code fences, no commentary.\n\n"
+        f"CV:\n{cv_text[:30000]}\n\n"
+        f"Job Description:\n{job_description[:12000]}"
+    )
+
+    try:
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model=get_gemini_model(),
+            contents=prompt,
+        )
+        content = (response.text or "").strip()
+        data = _parse_json(content)
+        return _normalize_result(data)
+    except gemini_errors.ClientError as exc:
+        if exc.code in (401, 403):
+            raise AuthenticationError("Invalid backend Gemini API key") from exc
+        if exc.code == 429:
+            raise RateLimitError("Gemini rate limit exceeded") from exc
+        raise ProviderError(f"Gemini request failed with status {exc.code}") from exc
+    except gemini_errors.ServerError as exc:
+        raise ProviderError(f"Gemini request failed with status {exc.code}") from exc
+    except gemini_errors.APIError as exc:
+        raise ProviderError("Gemini request failed") from exc
+    except ValueError as exc:
+        raise ProviderError("Model returned an invalid score format") from exc
+    finally:
         await asyncio.sleep(0)
 
 

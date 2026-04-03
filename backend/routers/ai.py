@@ -19,6 +19,7 @@ from dependencies import get_current_user
 from database import engine, get_session
 from models import CVData, Job, UserPublic
 from services import llm_service
+from services.job_enrichment import fetch_job_description_map
 from services.llm_service import ProviderError
 from worker import celery_app
 
@@ -45,6 +46,7 @@ class ScoreResponse(BaseModel):
     scored: int
     results: List[ScoreResult]
     errors: List[str] = Field(default_factory=list)
+    unscorable: int = 0
 
 
 class TaskAcceptedResponse(BaseModel):
@@ -75,6 +77,44 @@ class TaskStatusResponse(BaseModel):
     status: str
     result: dict | None = None
     error: str | None = None
+
+
+UNSCORABLE_SCORE_LABEL = "Unscorable"
+
+
+def _load_json_list(raw_value: str | None) -> list:
+    if not raw_value:
+        return []
+    try:
+        parsed = json.loads(raw_value)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _set_json_list(row: Job, field_name: str, values: list[str]) -> None:
+    setattr(row, field_name, json.dumps(values))
+
+
+def _append_job_event(row: Job, event_type: str, *, score: int | None = None, score_label: str | None = None) -> None:
+    events = _load_json_list(row.events)
+    payload = {"type": event_type, "timestamp": datetime.now(timezone.utc).isoformat()}
+    if score is not None:
+        payload["score"] = score
+    if score_label:
+        payload["score_label"] = score_label
+    events.append(payload)
+    row.events = json.dumps(events)
+
+
+def _mark_job_unscorable(row: Job, reason: str) -> None:
+    row.score = None
+    row.score_label = UNSCORABLE_SCORE_LABEL
+    _set_json_list(row, "score_reasoning", [reason])
+    red_flags = _load_json_list(row.red_flags)
+    if reason not in red_flags:
+        red_flags.append(reason)
+    _set_json_list(row, "red_flags", red_flags)
 
 
 def _parse_stored_cv_payload(raw_payload: str) -> dict:
@@ -179,6 +219,8 @@ def score_jobs_task(user_id: int, job_ids: List[int] | None = None) -> dict:
         if not cv_text.strip():
             return {
                 "scored": 0,
+                "results": [],
+                "unscorable": 0,
                 "errors": [
                     "CV is not ready for scoring. Re-upload a resume with readable text before scoring jobs."
                 ],
@@ -186,30 +228,65 @@ def score_jobs_task(user_id: int, job_ids: List[int] | None = None) -> dict:
 
         job_rows = _fetch_jobs(session, user_id, selected_ids)
         if not job_rows:
-            return {"scored": 0, "errors": ["No matching jobs found to score"]}
+            return {"scored": 0, "results": [], "unscorable": 0, "errors": ["No matching jobs found to score"]}
+
+        jobs_needing_description = [
+            row for row in job_rows if not (row.description or "").strip() and (row.url or "").strip() and row.id is not None
+        ]
+        enriched_descriptions: dict[int, str] = {}
+        enrichment_error: str | None = None
+        if jobs_needing_description:
+            try:
+                enriched_descriptions = asyncio.run(
+                    fetch_job_description_map(
+                        [(int(row.id), row.url or "") for row in jobs_needing_description if row.id is not None]
+                    )
+                )
+            except Exception as exc:
+                enriched_descriptions = {}
+                enrichment_error = str(exc)
 
         scored_count = 0
+        unscorable_count = 0
         errors: List[str] = []
+        results: List[dict[str, object]] = []
 
         for row in job_rows:
+            job_id = int(row.id or 0)
+            if row.id is not None and not (row.description or "").strip():
+                enriched_description = enriched_descriptions.get(int(row.id), "").strip()
+                if enriched_description:
+                    row.description = enriched_description
+
+            job_description = (row.description or "").strip()
+            if not job_description:
+                reason = "This job could not be scored because no usable job description was available for the listing."
+                if enrichment_error:
+                    reason = f"{reason} Enrichment failed: {enrichment_error}"
+                _mark_job_unscorable(row, reason)
+                session.add(row)
+                unscorable_count += 1
+                errors.append(f"job_id={job_id}: missing job description; scoring skipped")
+                continue
+
             try:
                 item = asyncio.run(
                     llm_service.get_score_from_ai(
                         cv_text=cv_text,
-                        job_description=row.description or "",
+                        job_description=job_description,
                     )
                 )
             except llm_service.AuthenticationError as exc:
-                errors.append(f"job_id={int(row.id)}: {exc}")
+                errors.append(f"job_id={job_id}: {exc}")
                 continue
             except llm_service.RateLimitError as exc:
-                errors.append(f"job_id={int(row.id)}: {exc}")
+                errors.append(f"job_id={job_id}: {exc}")
                 continue
             except llm_service.ProviderError as exc:
-                errors.append(f"job_id={int(row.id)}: {exc}")
+                errors.append(f"job_id={job_id}: {exc}")
                 continue
             except Exception:
-                errors.append(f"job_id={int(row.id)}: unexpected scoring error")
+                errors.append(f"job_id={job_id}: unexpected scoring error")
                 continue
 
             score = int(item.get("compatibility_score", 0))
@@ -217,15 +294,26 @@ def score_jobs_task(user_id: int, job_ids: List[int] | None = None) -> dict:
             reasoning = str(item.get("reasoning", "No reasoning provided."))
 
             row.score = float(score)
-            row.status = "scored"
+            row.score_label = status_value
+            if row.status == "new":
+                row.status = "scored"
             row.score_reasoning = json.dumps([reasoning])
             if not row.red_flags:
                 row.red_flags = json.dumps([])
+            _append_job_event(row, "scored", score=score, score_label=status_value)
             session.add(row)
             scored_count += 1
+            results.append(
+                {
+                    "job_id": job_id,
+                    "compatibility_score": score,
+                    "match_status": status_value,
+                    "reasoning": reasoning,
+                }
+            )
 
         session.commit()
-        return {"scored": scored_count, "errors": errors}
+        return {"scored": scored_count, "results": results, "unscorable": unscorable_count, "errors": errors}
 
 
 @router.post("/score-all", response_model=TaskAcceptedResponse, status_code=202)
@@ -233,6 +321,14 @@ def score_all(
     body: ScoreRequest | None = Body(default=None),
     current_user: UserPublic = Depends(get_current_user),
 ) -> TaskAcceptedResponse:
+    try:
+        llm_service.get_scoring_provider_name()
+    except llm_service.AuthenticationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
     req = body or ScoreRequest()
     task = score_jobs_task.delay(current_user.id, req.job_ids)
     return TaskAcceptedResponse(

@@ -4,6 +4,7 @@ export interface JobEvent {
   type: "scraped" | "scored" | "selected" | "applied" | "interviewing" | "offered" | "rejected";
   timestamp: string;
   score?: number;
+  score_label?: string;
 }
 
 export interface Job {
@@ -15,6 +16,7 @@ export interface Job {
   date_scraped: string;
   description: string;
   score: number | null;
+  score_label: string | null;
   score_reasoning: string[] | null;
   red_flags: string[] | null;
   status: JobStatus;

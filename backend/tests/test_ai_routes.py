@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -219,6 +220,7 @@ class AIRouteTests(unittest.TestCase):
             result = ai_router.score_jobs_task(1, [10])
 
         self.assertEqual(result["scored"], 1)
+        self.assertEqual(result["unscorable"], 0)
         self.assertEqual(captured["cv_text"], "RAW CV TEXT FOR SCORING")
         self.assertEqual(captured["job_description"], "Python APIs and SQL systems")
 
@@ -227,8 +229,118 @@ class AIRouteTests(unittest.TestCase):
             self.assertIsNotNone(job)
             assert job is not None
             self.assertEqual(job.score, 91)
+            self.assertEqual(job.score_label, "Excellent")
             self.assertEqual(job.status, "scored")
             self.assertIn("Strong Python and API overlap.", job.score_reasoning or "")
+
+    def test_score_jobs_task_enriches_missing_descriptions_before_scoring(self) -> None:
+        captured: dict[str, str] = {}
+
+        with Session(self.engine) as session:
+            session.add(
+                CVData(
+                    user_id=1,
+                    filename="resume.pdf",
+                    extracted_text="RAW CV TEXT FOR SCORING",
+                    parsed_json="{}",
+                )
+            )
+            session.add(
+                Job(
+                    id=11,
+                    user_id=1,
+                    title="Data Scientist",
+                    company="Acme",
+                    location="Remote",
+                    url="https://example.com/jobs/11",
+                    description="",
+                )
+            )
+            session.commit()
+
+        async def fake_score_from_ai(cv_text: str, job_description: str) -> dict[str, object]:
+            captured["cv_text"] = cv_text
+            captured["job_description"] = job_description
+            return {
+                "compatibility_score": 78,
+                "match_status": "Good",
+                "reasoning": "Strong match after loading the full job details.",
+            }
+
+        with (
+            patch.object(ai_router, "engine", self.engine),
+            patch.object(ai_router, "fetch_job_description_map", new=AsyncMock(return_value={11: "Detailed role requirements"})),
+            patch.object(ai_router.llm_service, "get_score_from_ai", new=fake_score_from_ai),
+        ):
+            result = ai_router.score_jobs_task(1, [11])
+
+        self.assertEqual(result["scored"], 1)
+        self.assertEqual(result["unscorable"], 0)
+        self.assertEqual(captured["job_description"], "Detailed role requirements")
+
+        with Session(self.engine) as session:
+            job = session.get(Job, 11)
+            self.assertIsNotNone(job)
+            assert job is not None
+            self.assertEqual(job.description, "Detailed role requirements")
+            self.assertEqual(job.score_label, "Good")
+            self.assertEqual(job.score, 78)
+
+    def test_score_jobs_task_marks_job_unscorable_when_description_is_missing(self) -> None:
+        with Session(self.engine) as session:
+            session.add(
+                CVData(
+                    user_id=1,
+                    filename="resume.pdf",
+                    extracted_text="RAW CV TEXT FOR SCORING",
+                    parsed_json="{}",
+                )
+            )
+            session.add(
+                Job(
+                    id=12,
+                    user_id=1,
+                    title="ML Engineer",
+                    company="Acme",
+                    location="Remote",
+                    url="",
+                    description="",
+                )
+            )
+            session.commit()
+
+        with (
+            patch.object(ai_router, "engine", self.engine),
+            patch.object(ai_router, "fetch_job_description_map", new=AsyncMock(return_value={})),
+            patch.object(ai_router.llm_service, "get_score_from_ai", new=AsyncMock(side_effect=AssertionError("should not score"))),
+        ):
+            result = ai_router.score_jobs_task(1, [12])
+
+        self.assertEqual(result["scored"], 0)
+        self.assertEqual(result["unscorable"], 1)
+        self.assertIn("missing job description; scoring skipped", result["errors"][0])
+
+        with Session(self.engine) as session:
+            job = session.get(Job, 12)
+            self.assertIsNotNone(job)
+            assert job is not None
+            self.assertIsNone(job.score)
+            self.assertEqual(job.score_label, "Unscorable")
+            self.assertEqual(job.status, "new")
+            self.assertIn("no usable job description", (job.score_reasoning or "").lower())
+            red_flags = json.loads(job.red_flags or "[]")
+            self.assertTrue(any("job description" in flag.lower() for flag in red_flags))
+
+    def test_score_all_returns_clear_error_when_no_provider_is_configured(self) -> None:
+        with patch.object(
+            ai_router.llm_service,
+            "get_scoring_provider_name",
+            side_effect=ai_router.llm_service.AuthenticationError("Missing backend model provider key."),
+        ), self.assertRaises(ai_router.HTTPException) as exc_info:
+            ai_router.score_all(body=ai_router.ScoreRequest(), current_user=self.current_user)
+
+        self.assertEqual(exc_info.exception.status_code, 503)
+        self.assertEqual(exc_info.exception.detail, "Missing backend model provider key.")
 
 
 if __name__ == "__main__":

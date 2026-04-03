@@ -49,6 +49,7 @@ function createJob(overrides: Partial<Job> = {}): Job {
     date_scraped: "2026-04-02T00:00:00.000Z",
     description: "Build product experiences.",
     score: 88,
+    score_label: "Excellent",
     score_reasoning: ["Strong product fit"],
     red_flags: [],
     status: "new",

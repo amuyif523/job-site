@@ -32,6 +32,12 @@ type MockJob = {
   url: string;
   date_scraped: string;
   description: string;
+  intent_status: "included" | "borderline" | "excluded";
+  intent_reason: string;
+  matched_keywords: string[];
+  blocked_keywords: string[];
+  inferred_seniority: "entry-level" | "mid-level" | "senior" | "internship" | "unknown";
+  source_confidence: "low" | "medium" | "high";
   enrichment_status: "pending" | "ready" | "enriched" | "partial" | "missing" | "failed";
   enrichment_error: string;
   scoring_ready: boolean;
@@ -125,6 +131,12 @@ function newJob(overrides: Partial<MockJob> = {}): MockJob {
     url: "https://example.com/jobs/1",
     date_scraped: "2026-04-02T00:00:00.000Z",
     description: "Build polished React product experiences.",
+    intent_status: "included",
+    intent_reason: "Included for Engineer based on title keyword overlap.",
+    matched_keywords: ["engineer"],
+    blocked_keywords: [],
+    inferred_seniority: "mid-level",
+    source_confidence: "medium",
     enrichment_status: "ready",
     enrichment_error: "",
     scoring_ready: true,

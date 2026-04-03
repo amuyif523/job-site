@@ -13,6 +13,7 @@ from database import get_session
 from dependencies import get_current_user
 from models import Job, UserPublic
 from services.job_enrichment import has_high_fidelity_description, normalize_job_description
+from services.job_intelligence import analyze_job_listing
 
 router = APIRouter()
 
@@ -28,6 +29,8 @@ def job_to_dict(job: Job) -> dict:
     d = job.model_dump()
     d["score_reasoning"] = json.loads(d["score_reasoning"]) if d["score_reasoning"] else None
     d["red_flags"]        = json.loads(d["red_flags"])       if d["red_flags"]        else None
+    d["matched_keywords"] = json.loads(d["matched_keywords"]) if d["matched_keywords"] else []
+    d["blocked_keywords"] = json.loads(d["blocked_keywords"]) if d["blocked_keywords"] else []
     d["events"]           = json.loads(d["events"])          if d["events"]           else []
     return d
 
@@ -91,6 +94,12 @@ def create_job(
 ):
     normalized_description = normalize_job_description(body.description or "")
     enrichment_status, scoring_ready = _derive_manual_job_readiness(normalized_description)
+    intent = analyze_job_listing(
+        title=body.title,
+        company=body.company,
+        location=body.location or "",
+        target_role=current_user.target_role,
+    )
     row = Job(
         user_id=current_user.id,
         title=body.title,
@@ -98,6 +107,12 @@ def create_job(
         location=body.location or "",
         url=body.url or "",
         description=normalized_description,
+        intent_status=intent.status if intent.should_save else "included",
+        intent_reason="Manually added job." if not normalized_description else intent.reason,
+        matched_keywords=json.dumps(intent.matched_keywords),
+        blocked_keywords=json.dumps(intent.blocked_keywords),
+        inferred_seniority=intent.inferred_seniority,
+        source_confidence=intent.source_confidence,
         enrichment_status=enrichment_status,
         scoring_ready=scoring_ready,
     )

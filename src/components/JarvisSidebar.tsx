@@ -17,7 +17,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
-import { fetchScrapeStatus, runScraper, type ScrapeTaskProgress } from "@/lib/api";
+import { fetchScrapeStatus, runScraper, type ScrapeTaskProgress, type ScrapeTaskResult } from "@/lib/api";
 import { Progress } from "@/components/ui/progress";
 
 export type Section = "dashboard" | "jobs" | "applications" | "profile" | "templates" | "leaderboard";
@@ -41,6 +41,9 @@ interface ScrapeRunSummary {
   targetRole: string;
   jobsFound: number;
   jobsSaved: number;
+  jobsFilteredOut?: number;
+  filtersApplied?: string[];
+  sampleFilteredReasons?: string[];
   error?: string | null;
 }
 
@@ -237,6 +240,7 @@ function buildRunSummary(
   status: "success" | "failure",
   progress: ScrapeTaskProgress | null,
   fallbackRole: string,
+  result?: ScrapeTaskResult | null,
   error?: string | null
 ): ScrapeRunSummary {
   return {
@@ -246,6 +250,9 @@ function buildRunSummary(
     targetRole: progress?.target_role || fallbackRole,
     jobsFound: progress?.jobs_found ?? 0,
     jobsSaved: progress?.jobs_saved ?? 0,
+    jobsFilteredOut: result?.jobs_filtered_out ?? 0,
+    filtersApplied: result?.filters_applied ?? [],
+    sampleFilteredReasons: result?.sample_filtered_reasons ?? [],
     error: error || null,
   };
 }
@@ -370,7 +377,7 @@ export function Sidebar({
         storeProgress(data.progress, userId);
 
         if (data.status === "success") {
-          const summary = buildRunSummary("success", data.progress, targetRole);
+          const summary = buildRunSummary("success", data.progress, targetRole, data.result);
           finishScrape(summary, data.progress);
           localStorage.setItem(getStorageKey(SCRAPE_KEY, userId), Date.now().toString());
           setCooldown(true);
@@ -385,7 +392,7 @@ export function Sidebar({
           } else {
             toast({
               title: "Scrape complete",
-              description: `JobTeaser found ${data.progress.jobs_found} jobs and saved ${data.progress.jobs_saved}.`,
+              description: `JobTeaser found ${data.progress.jobs_found} jobs, filtered ${data.result?.jobs_filtered_out ?? 0}, and saved ${data.progress.jobs_saved}.`,
             });
           }
           return;
@@ -393,7 +400,7 @@ export function Sidebar({
 
         if (data.status === "failure") {
           const guidance = getFailureGuidance(data.error);
-          const summary = buildRunSummary("failure", data.progress, targetRole, data.error);
+          const summary = buildRunSummary("failure", data.progress, targetRole, data.result, data.error);
           finishScrape(summary, data.progress);
           toast({
             title: guidance.label,
@@ -598,7 +605,11 @@ export function Sidebar({
                 <>
                   <p>Last run: {formatTimestamp(lastRunSummary.timestamp)}</p>
                   <p>Jobs found: {lastRunSummary.jobsFound}</p>
+                  <p>Jobs filtered out: {lastRunSummary.jobsFilteredOut ?? 0}</p>
                   <p>Jobs saved: {lastRunSummary.jobsSaved}</p>
+                  {lastRunSummary.filtersApplied?.length ? (
+                    <p>Intent filters: {lastRunSummary.filtersApplied.join(", ")}</p>
+                  ) : null}
                   <p>Last successful scrape: {formatTimestamp(getLastScrape(userId))}</p>
                 </>
               )}
@@ -620,6 +631,14 @@ export function Sidebar({
             {!scraping && lastRunSummary?.status === "success" && lastRunSummary.jobsFound === 0 && (
               <div className="mt-3 rounded-md border border-jarvis-blue/20 bg-jarvis-blue/10 px-2 py-2 font-mono text-[10px] text-jarvis-blue">
                 No jobs were found this run. Try adjusting your target role, broadening search terms, or retrying later.
+              </div>
+            )}
+
+            {!scraping && lastRunSummary?.status === "success" && (lastRunSummary.jobsFilteredOut ?? 0) > 0 && (
+              <div className="mt-3 rounded-md border border-emerald-400/20 bg-emerald-400/10 px-2 py-2 font-mono text-[10px] text-emerald-200">
+                JARVIS filtered out {lastRunSummary.jobsFilteredOut} obviously off-target listing
+                {(lastRunSummary.jobsFilteredOut ?? 0) === 1 ? "" : "s"} before saving matches for {currentTargetRole}.
+                {lastRunSummary.sampleFilteredReasons?.length ? ` Example: ${lastRunSummary.sampleFilteredReasons[0]}` : ""}
               </div>
             )}
 

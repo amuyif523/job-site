@@ -3,6 +3,7 @@ scraper.py — JobTeaser scraper using Playwright
 """
 
 import asyncio
+import json
 from collections.abc import Callable
 from threading import Lock
 from typing import Any
@@ -18,6 +19,7 @@ from database import engine
 from dependencies import get_current_user
 from models import Job, UserPublic
 from services.job_enrichment import normalize_job_description
+from services.job_intelligence import analyze_job_listing
 from worker import celery_app
 
 router = APIRouter()
@@ -43,6 +45,9 @@ class ScrapeTaskResult(BaseModel):
     target_role: str = ""
     jobs_found: int = 0
     jobs_saved: int = 0
+    jobs_filtered_out: int = 0
+    filters_applied: list[str] = []
+    sample_filtered_reasons: list[str] = []
     progress: ScrapeProgress
 
 
@@ -170,6 +175,8 @@ async def scrape_jobteaser(
         base_url += f"&q={quote(target_role)}"
 
     all_jobs = []
+    filtered_out = 0
+    filtered_reasons: list[str] = []
     page_num = 1
     report_progress(phase="launching_browser", page=0, jobs_found=0, jobs_saved=0)
 
@@ -220,11 +227,30 @@ async def scrape_jobteaser(
                     parts    = contract.split("·")
                     location = parts[0].strip() if parts else ""
 
+                    intent = analyze_job_listing(
+                        title=title.strip(),
+                        company=company.strip(),
+                        location=location,
+                        target_role=target_role,
+                    )
+
+                    if not intent.should_save:
+                        filtered_out += 1
+                        if len(filtered_reasons) < 5:
+                            filtered_reasons.append(f"{title.strip()}: {intent.reason}")
+                        continue
+
                     all_jobs.append({
                         "title":    title.strip(),
                         "company":  company.strip(),
                         "location": location,
                         "url":      job_url,
+                        "intent_status": intent.status,
+                        "intent_reason": intent.reason,
+                        "matched_keywords": intent.matched_keywords,
+                        "blocked_keywords": intent.blocked_keywords,
+                        "inferred_seniority": intent.inferred_seniority,
+                        "source_confidence": intent.source_confidence,
                     })
                     report_progress(
                         phase="extracting_jobs",
@@ -262,6 +288,12 @@ async def scrape_jobteaser(
                         location=job["location"],
                         url=job["url"],
                         description=normalize_job_description(""),
+                        intent_status=job["intent_status"],
+                        intent_reason=job["intent_reason"],
+                        matched_keywords=json.dumps(job["matched_keywords"]),
+                        blocked_keywords=json.dumps(job["blocked_keywords"]),
+                        inferred_seniority=job["inferred_seniority"],
+                        source_confidence=job["source_confidence"],
                         enrichment_status="pending",
                         enrichment_error="",
                         scoring_ready=False,
@@ -299,6 +331,13 @@ async def scrape_jobteaser(
         "target_role": target_role,
         "jobs_found": len(all_jobs),
         "jobs_saved": saved,
+        "jobs_filtered_out": filtered_out,
+        "filters_applied": [
+            "Target role keyword matching",
+            "Off-role keyword blocking",
+            "Title-based seniority inference",
+        ],
+        "sample_filtered_reasons": filtered_reasons,
         "progress": progress,
     }
 

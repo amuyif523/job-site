@@ -102,6 +102,9 @@ export interface ScrapeTaskResult {
   target_role: string;
   jobs_found: number;
   jobs_saved: number;
+  jobs_filtered_out?: number;
+  filters_applied?: string[];
+  sample_filtered_reasons?: string[];
   progress: ScrapeTaskProgress;
 }
 

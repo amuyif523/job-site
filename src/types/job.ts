@@ -15,6 +15,12 @@ export interface Job {
   url: string;
   date_scraped: string;
   description: string;
+  intent_status: "included" | "borderline" | "excluded";
+  intent_reason: string;
+  matched_keywords: string[];
+  blocked_keywords: string[];
+  inferred_seniority: "entry-level" | "mid-level" | "senior" | "internship" | "unknown";
+  source_confidence: "low" | "medium" | "high";
   enrichment_status: "pending" | "ready" | "enriched" | "partial" | "missing" | "failed";
   enrichment_error: string;
   scoring_ready: boolean;

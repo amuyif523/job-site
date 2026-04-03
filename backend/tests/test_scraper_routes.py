@@ -17,7 +17,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 import main
 from models import User, UserPublic
-from routers import scraper as scraper_router
+import scraper as scraper_router
 
 
 class CorruptedCeleryResult:

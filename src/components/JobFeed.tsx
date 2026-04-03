@@ -8,6 +8,7 @@ import { toast } from "@/hooks/use-toast";
 import { Search, Loader2, ExternalLink, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { canGenerateForJob, getGenerationBlockReason, getScoreContextMessage, hasIncompleteScoreData } from "@/lib/jobScoring";
+import { getIntentBadgeLabel, getIntentMetadata, getIntentSummary, getIntentToneClasses } from "@/lib/jobIntent";
 
 interface JobFeedProps {
   jobs: Job[];
@@ -71,6 +72,7 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreBu
   const selectedHasIncompleteScoreData = selected ? hasIncompleteScoreData(selected) : false;
   const selectedCanGenerate = selected ? canGenerateForJob(selected) : false;
   const generationBlockReason = selected ? getGenerationBlockReason(selected) : "";
+  const selectedIntentMetadata = selected ? getIntentMetadata(selected) : [];
 
   return (
     <div className="animate-fade-up flex gap-0 h-[calc(100vh-64px)]">
@@ -150,6 +152,14 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreBu
                 <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-full" style={{ color: statusColors[job.status], background: statusColors[job.status] + "26" }}>
                   {job.status}
                 </span>
+                <span
+                  className={cn(
+                    "font-mono text-[10px] px-1.5 py-0.5 rounded-full border",
+                    getIntentToneClasses(job)
+                  )}
+                >
+                  {getIntentBadgeLabel(job)}
+                </span>
               </div>
             </button>
           ))}
@@ -196,6 +206,20 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreBu
                       {selected.score_label}
                     </p>
                   )}
+                  <div className={cn("mt-2 inline-flex w-fit rounded-full border px-2 py-1 font-mono text-[10px] uppercase tracking-wide", getIntentToneClasses(selected))}>
+                    {getIntentBadgeLabel(selected)}
+                  </div>
+                  <p className="mt-2 font-mono text-[11px] text-muted-foreground">{selectedIntentMetadata.join(" · ")}</p>
+                  <div className={cn("mt-3 rounded-md border px-3 py-2 font-mono text-[11px]", getIntentToneClasses(selected))}>
+                    <p className="uppercase tracking-[0.2em] text-[10px]">Why JARVIS kept this job</p>
+                    <p className="mt-1">{getIntentSummary(selected)}</p>
+                    {selected.matched_keywords.length ? (
+                      <p className="mt-2">Matched keywords: {selected.matched_keywords.join(", ")}</p>
+                    ) : null}
+                    {selected.blocked_keywords.length ? (
+                      <p className="mt-1">Conflicting keywords: {selected.blocked_keywords.join(", ")}</p>
+                    ) : null}
+                  </div>
                   {(selected.score !== null || selected.score_label === "Unscorable") && (
                     <div
                       className={cn(

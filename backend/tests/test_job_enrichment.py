@@ -148,6 +148,33 @@ class JobEnrichmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[1].quality, "summary")
         playwright_mock.assert_not_called()
 
+    async def test_fetch_job_enrichment_map_reports_total_failure_when_html_fails(self) -> None:
+        with patch.object(
+            job_enrichment,
+            "_extract_with_html",
+            new=AsyncMock(
+                return_value=job_enrichment.EnrichmentAttempt(
+                    description="",
+                    method="html",
+                    duration_ms=140,
+                    error="HTML extraction failed.",
+                    retryable=False,
+                    quality="summary",
+                )
+            ),
+        ), patch.object(
+            job_enrichment,
+            "_extract_with_playwright_batch",
+            new=AsyncMock(return_value={}),
+        ) as playwright_mock:
+            result = await job_enrichment.fetch_job_enrichment_map([(1, "https://example.com/job/1")])
+
+        self.assertEqual(result[1].method, "html")
+        self.assertEqual(result[1].description, "")
+        self.assertEqual(result[1].error, "HTML extraction failed.")
+        self.assertFalse(result[1].retryable)
+        playwright_mock.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

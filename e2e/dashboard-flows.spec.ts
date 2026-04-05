@@ -198,9 +198,26 @@ function scrapeStatus(
 }
 
 async function mockAppApi(page: Page, state: MockState) {
-  await page.route("http://localhost:8000/**", async (route) => {
+  await page.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+
+    const isMockedApiCall =
+      url.pathname === "/auth/me" ||
+      url.pathname === "/auth/logout" ||
+      url.pathname === "/api/cv/latest" ||
+      url.pathname === "/api/ai/upload_cv" ||
+      url.pathname === "/api/jobs" ||
+      url.pathname === "/api/scrape" ||
+      url.pathname === "/api/scrape/status" ||
+      url.pathname === "/api/score-all" ||
+      url.pathname === "/api/score-all/status" ||
+      url.pathname.startsWith("/api/generate/");
+
+    if (!isMockedApiCall) {
+      await route.continue();
+      return;
+    }
 
     if (url.pathname === "/auth/me") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(user) });
@@ -793,9 +810,12 @@ test("upload, scrape, score, review, and generate application flows end to end",
   await page.getByRole("button", { name: "Jobs" }).click();
   await page.getByRole("button", { name: "Score All" }).click();
   await expect(page.getByText("91")).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "Dashboard" }).click();
+  await expect(page.locator("p", { hasText: "TOP MATCHES" }).first()).toBeVisible();
 
+  await page.getByRole("button", { name: "Jobs" }).click();
   await page.getByText("Frontend Engineer").click();
-  await expect(page.getByText("Why This Score Exists")).toBeVisible();
+  await expect(page.getByText("Included for Engineer based on title keyword overlap.")).toBeVisible();
   await page.getByRole("button", { name: /generate application/i }).click();
   await expect(page.getByText("GENERATE APPLICATION")).toBeVisible();
   await page.getByRole("button", { name: /next/i }).click();

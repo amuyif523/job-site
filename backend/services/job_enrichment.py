@@ -16,8 +16,10 @@ from typing import Any
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeoutError, async_playwright
 
 MAX_DESCRIPTION_LENGTH = 12000
-MIN_SCORING_DESCRIPTION_LENGTH = 200
-MIN_DESCRIPTION_LENGTH = MIN_SCORING_DESCRIPTION_LENGTH
+MAX_LISTING_SUMMARY_LENGTH = 1000
+MIN_SUMMARY_DESCRIPTION_LENGTH = 200
+MIN_SCORING_DESCRIPTION_LENGTH = 600
+MIN_DESCRIPTION_LENGTH = MIN_SUMMARY_DESCRIPTION_LENGTH
 HTML_TIMEOUT_SECONDS = 12
 HTML_FETCH_RETRIES = 2
 HTML_CONCURRENCY = 4
@@ -68,6 +70,7 @@ class EnrichmentAttempt:
     duration_ms: int = 0
     error: str = ""
     retryable: bool = False
+    quality: str = "summary"
 
 
 class _HTMLTextCollector(HTMLParser):
@@ -111,6 +114,10 @@ def _collapse_whitespace(value: str) -> str:
     return cleaned[:MAX_DESCRIPTION_LENGTH]
 
 
+def normalize_listing_summary(value: str) -> str:
+    return _collapse_whitespace(value)[:MAX_LISTING_SUMMARY_LENGTH]
+
+
 def _iter_json_candidates(value: Any) -> list[str]:
     results: list[str] = []
     if isinstance(value, dict):
@@ -146,8 +153,28 @@ def normalize_job_description(value: str) -> str:
     return _collapse_whitespace(value)
 
 
+def _count_keyword_hits(value: str) -> int:
+    lowered = normalize_job_description(value).lower()
+    return sum(1 for keyword in KEYWORD_HINTS if keyword in lowered)
+
+
+def classify_description_quality(value: str) -> str:
+    normalized = normalize_job_description(value)
+    if not normalized:
+        return "summary"
+
+    keyword_hits = _count_keyword_hits(normalized)
+    if len(normalized) < MIN_SUMMARY_DESCRIPTION_LENGTH or keyword_hits == 0:
+        return "summary"
+
+    if len(normalized) < MIN_SCORING_DESCRIPTION_LENGTH or keyword_hits < 3:
+        return "partial"
+
+    return "full"
+
+
 def has_high_fidelity_description(value: str) -> bool:
-    return len(normalize_job_description(value)) >= MIN_SCORING_DESCRIPTION_LENGTH
+    return classify_description_quality(value) == "full"
 
 
 def _extract_json_ld_candidates_from_html(html: str) -> list[str]:
@@ -175,9 +202,9 @@ def _extract_html_candidates(html: str) -> list[str]:
     return candidates
 
 
-def _looks_js_heavy(html: str, description: str) -> bool:
+def _looks_js_heavy(html: str) -> bool:
     lowered = html.lower()
-    return any(hint in lowered for hint in JS_HEAVY_HINTS) or not has_high_fidelity_description(description)
+    return any(hint in lowered for hint in JS_HEAVY_HINTS)
 
 
 def _fetch_html_sync(url: str) -> str:
@@ -203,31 +230,50 @@ async def _fetch_html(url: str) -> str:
 
 async def _extract_with_html(url: str) -> EnrichmentAttempt:
     start = time.perf_counter()
-    retryable = False
     last_error = ""
     for attempt in range(HTML_FETCH_RETRIES):
         try:
             html = await _fetch_html(url)
             candidates = _extract_html_candidates(html)
             description = _pick_best_candidate(candidates)
+            quality = classify_description_quality(description)
             duration_ms = int((time.perf_counter() - start) * 1000)
-            if description and not _looks_js_heavy(html, description):
+            if quality == "full" and not _looks_js_heavy(html):
                 return EnrichmentAttempt(
                     description=description,
                     method="html",
                     duration_ms=duration_ms,
                     error="",
                     retryable=False,
+                    quality=quality,
+                )
+            if quality in {"partial", "full"} and _looks_js_heavy(html):
+                return EnrichmentAttempt(
+                    description=description,
+                    method="html",
+                    duration_ms=duration_ms,
+                    error="HTML extraction looks JS-rendered; falling back to Playwright.",
+                    retryable=True,
+                    quality=quality,
+                )
+            if quality == "partial":
+                return EnrichmentAttempt(
+                    description=description,
+                    method="html",
+                    duration_ms=duration_ms,
+                    error="HTML extraction was incomplete; falling back to Playwright.",
+                    retryable=True,
+                    quality=quality,
                 )
             return EnrichmentAttempt(
                 description=description,
                 method="html",
                 duration_ms=duration_ms,
-                error="HTML extraction was incomplete; falling back to Playwright.",
-                retryable=True,
+                error="HTML extraction only found a listing summary.",
+                retryable=False,
+                quality=quality,
             )
         except (asyncio.TimeoutError, URLError, HTTPError) as exc:
-            retryable = True
             last_error = str(exc)
             if attempt + 1 < HTML_FETCH_RETRIES:
                 await asyncio.sleep(0.35 * (attempt + 1))
@@ -242,7 +288,8 @@ async def _extract_with_html(url: str) -> EnrichmentAttempt:
         method="html",
         duration_ms=int((time.perf_counter() - start) * 1000),
         error=last_error or "HTML extraction failed.",
-        retryable=retryable,
+        retryable=False,
+        quality="summary",
     )
 
 
@@ -318,12 +365,14 @@ async def _extract_with_playwright_batch(job_targets: Sequence[tuple[int, str]])
                 start = time.perf_counter()
                 try:
                     description = await _extract_job_description(page, url)
+                    quality = classify_description_quality(description)
                     attempts[job_id] = EnrichmentAttempt(
                         description=description,
                         method="playwright",
                         duration_ms=int((time.perf_counter() - start) * 1000),
                         error="" if description else "Playwright could not find a usable description.",
                         retryable=False,
+                        quality=quality,
                     )
                 except Exception as exc:
                     attempts[job_id] = EnrichmentAttempt(
@@ -332,6 +381,7 @@ async def _extract_with_playwright_batch(job_targets: Sequence[tuple[int, str]])
                         duration_ms=int((time.perf_counter() - start) * 1000),
                         error=str(exc),
                         retryable=False,
+                        quality="summary",
                     )
         finally:
             await browser.close()

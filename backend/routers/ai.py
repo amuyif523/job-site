@@ -25,8 +25,8 @@ from models import CVData, Job, UserPublic
 from services import llm_service
 from services.job_enrichment import (
     EnrichmentAttempt,
+    classify_description_quality,
     fetch_job_enrichment_map,
-    has_high_fidelity_description,
     normalize_job_description,
 )
 from services.llm_service import ProviderError
@@ -213,6 +213,7 @@ def _set_job_enrichment_state(
     method: str = "",
     duration_ms: int = 0,
     retryable: bool = False,
+    description_quality: str = "summary",
 ) -> None:
     row.enrichment_status = status
     row.enrichment_error = error
@@ -220,6 +221,7 @@ def _set_job_enrichment_state(
     row.enrichment_method = method
     row.enrichment_duration_ms = max(duration_ms, 0)
     row.enrichment_retryable = retryable
+    row.description_quality = description_quality
 
 
 def _refresh_job_scoring_readiness(
@@ -233,9 +235,11 @@ def _refresh_job_scoring_readiness(
 ) -> None:
     description = normalize_job_description(row.description or "")
     row.description = description
-    incomplete_retryable = bool(retryable and error and description)
+    description_quality = classify_description_quality(description)
+    row.description_quality = description_quality
+    incomplete_retryable = bool(retryable and error and description and description_quality == "partial")
 
-    if has_high_fidelity_description(description):
+    if description_quality == "full":
         status_value = "enriched" if prefer_enriched_label else "ready"
         _set_job_enrichment_state(
             row,
@@ -245,11 +249,12 @@ def _refresh_job_scoring_readiness(
             method=method,
             duration_ms=duration_ms,
             retryable=False,
+            description_quality=description_quality,
         )
         return
 
     if description:
-        status_value = "failed" if error and not incomplete_retryable else "partial"
+        status_value = "partial"
         error_value = "" if incomplete_retryable else error
         _set_job_enrichment_state(
             row,
@@ -259,6 +264,7 @@ def _refresh_job_scoring_readiness(
             method=method,
             duration_ms=duration_ms,
             retryable=retryable,
+            description_quality=description_quality,
         )
         return
 
@@ -271,6 +277,7 @@ def _refresh_job_scoring_readiness(
         method=method,
         duration_ms=duration_ms,
         retryable=retryable,
+        description_quality=description_quality,
     )
 
 
@@ -438,7 +445,7 @@ def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dic
         jobs_needing_description = [
             row
             for row in job_rows
-            if not has_high_fidelity_description(row.description or "")
+            if classify_description_quality(row.description or "") != "full"
             and (row.url or "").strip()
             and row.id is not None
         ]
@@ -465,10 +472,11 @@ def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dic
             job_id = int(row.id or 0)
             enriched_this_job = False
             enrichment_attempt = enrichment_attempts.get(int(row.id)) if row.id is not None else None
-            if row.id is not None and not has_high_fidelity_description(row.description or ""):
+            if row.id is not None and classify_description_quality(row.description or "") != "full":
                 enriched_description = (enrichment_attempt.description if enrichment_attempt else "").strip()
-                if enriched_description:
+                if enriched_description and (enrichment_attempt is None or enrichment_attempt.quality != "summary"):
                     row.description = enriched_description
+                    row.description_quality = classify_description_quality(enriched_description)
                     _append_job_event(row, "enriched")
                     enriched_this_job = True
 

@@ -12,7 +12,7 @@ from sqlmodel import Session, select
 from database import get_session
 from dependencies import get_current_user
 from models import Job, UserPublic
-from services.job_enrichment import has_high_fidelity_description, normalize_job_description
+from services.job_enrichment import classify_description_quality, normalize_job_description
 from services.job_intelligence import analyze_job_listing
 
 router = APIRouter()
@@ -51,10 +51,10 @@ class JobCreate(BaseModel):
     description: Optional[str] = ""
 
 
-def _derive_manual_job_readiness(description: str) -> tuple[str, bool]:
-    if has_high_fidelity_description(description):
+def _derive_manual_job_readiness(description_quality: str) -> tuple[str, bool]:
+    if description_quality == "full":
         return ("ready", True)
-    if description:
+    if description_quality == "partial":
         return ("partial", False)
     return ("missing", False)
 
@@ -93,7 +93,8 @@ def create_job(
     session: Session = Depends(get_session),
 ):
     normalized_description = normalize_job_description(body.description or "")
-    enrichment_status, scoring_ready = _derive_manual_job_readiness(normalized_description)
+    description_quality = classify_description_quality(normalized_description)
+    enrichment_status, scoring_ready = _derive_manual_job_readiness(description_quality)
     intent = analyze_job_listing(
         title=body.title,
         company=body.company,
@@ -106,7 +107,9 @@ def create_job(
         company=body.company,
         location=body.location or "",
         url=body.url or "",
+        listing_summary="",
         description=normalized_description,
+        description_quality=description_quality,
         intent_status=intent.status if intent.should_save else "included",
         intent_reason="Manually added job." if not normalized_description else intent.reason,
         matched_keywords=json.dumps(intent.matched_keywords),

@@ -18,7 +18,7 @@ from kombu.exceptions import OperationalError
 from database import engine
 from dependencies import get_current_user
 from models import Job, UserPublic
-from services.job_enrichment import normalize_job_description
+from services.job_enrichment import classify_description_quality, normalize_job_description, normalize_listing_summary
 from services.job_intelligence import analyze_job_listing
 from worker import celery_app
 
@@ -226,6 +226,8 @@ async def scrape_jobteaser(
                     # Parse location from contract info (usually "City · Contract type")
                     parts    = contract.split("·")
                     location = parts[0].strip() if parts else ""
+                    listing_summary = normalize_listing_summary(await card.inner_text())
+                    description_quality = classify_description_quality("")
 
                     intent = analyze_job_listing(
                         title=title.strip(),
@@ -245,6 +247,8 @@ async def scrape_jobteaser(
                         "company":  company.strip(),
                         "location": location,
                         "url":      job_url,
+                        "listing_summary": listing_summary,
+                        "description_quality": description_quality,
                         "intent_status": intent.status,
                         "intent_reason": intent.reason,
                         "matched_keywords": intent.matched_keywords,
@@ -287,7 +291,9 @@ async def scrape_jobteaser(
                         company=job["company"],
                         location=job["location"],
                         url=job["url"],
+                        listing_summary=job["listing_summary"],
                         description=normalize_job_description(""),
+                        description_quality=job["description_quality"],
                         intent_status=job["intent_status"],
                         intent_reason=job["intent_reason"],
                         matched_keywords=json.dumps(job["matched_keywords"]),

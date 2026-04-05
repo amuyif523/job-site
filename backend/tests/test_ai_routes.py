@@ -201,7 +201,12 @@ class AIRouteTests(unittest.TestCase):
                     company="Acme",
                     location="Remote",
                     url="https://example.com/jobs/10",
-                    description="Python APIs and SQL systems",
+                    listing_summary="Backend Engineer listing summary",
+                    description=(
+                        "Responsibilities and requirements include Python APIs, SQL systems, skills in stakeholder communication, and experience delivering production services. "
+                        * 6
+                    ),
+                    description_quality="full",
                 )
             )
             session.commit()
@@ -224,7 +229,8 @@ class AIRouteTests(unittest.TestCase):
         self.assertEqual(result["scored"], 1)
         self.assertEqual(result["unscorable"], 0)
         self.assertEqual(captured["cv_text"], "RAW CV TEXT FOR SCORING")
-        self.assertEqual(captured["job_description"], "Python APIs and SQL systems")
+        self.assertIn("Python APIs, SQL systems", captured["job_description"])
+        self.assertGreater(len(captured["job_description"]), 600)
 
         with Session(self.engine) as session:
             job = session.get(Job, 10)
@@ -235,6 +241,7 @@ class AIRouteTests(unittest.TestCase):
             self.assertEqual(job.status, "scored")
             self.assertTrue(job.scoring_ready)
             self.assertEqual(job.enrichment_status, "ready")
+            self.assertEqual(job.description_quality, "full")
             self.assertIn("Strong Python and API overlap.", job.score_reasoning or "")
 
     def test_score_jobs_task_enriches_missing_descriptions_before_scoring(self) -> None:
@@ -258,6 +265,8 @@ class AIRouteTests(unittest.TestCase):
                     location="Remote",
                     url="https://example.com/jobs/11",
                     description="",
+                    listing_summary="Data Scientist listing summary",
+                    description_quality="summary",
                 )
             )
             session.commit()
@@ -280,13 +289,16 @@ class AIRouteTests(unittest.TestCase):
                     return_value={
                         11: ai_router.EnrichmentAttempt(
                             description=(
-                                "Detailed role requirements covering SQL, experimentation, stakeholder communication, "
-                                "dashboard delivery, forecasting, data quality ownership, and collaboration with engineering and product teams." * 2
+                                "Detailed role responsibilities and requirements covering SQL, experimentation, stakeholder communication, "
+                                "dashboard delivery, forecasting, data quality ownership, collaboration with engineering and product teams, "
+                                "skills coaching, release planning, and experience leading cross-functional roadmap ownership. "
+                                * 4
                             ),
                             method="html",
                             duration_ms=420,
                             error="",
                             retryable=False,
+                            quality="full",
                         )
                     }
                 ),
@@ -297,16 +309,17 @@ class AIRouteTests(unittest.TestCase):
 
         self.assertEqual(result["scored"], 1)
         self.assertEqual(result["unscorable"], 0)
-        self.assertIn("Detailed role requirements", captured["job_description"])
+        self.assertIn("Detailed role responsibilities and requirements", captured["job_description"])
 
         with Session(self.engine) as session:
             job = session.get(Job, 11)
             self.assertIsNotNone(job)
             assert job is not None
-            self.assertIn("Detailed role requirements", job.description)
+            self.assertIn("Detailed role responsibilities and requirements", job.description)
             self.assertEqual(job.score_label, "Good")
             self.assertEqual(job.score, 78)
             self.assertEqual(job.enrichment_status, "enriched")
+            self.assertEqual(job.description_quality, "full")
             self.assertTrue(job.scoring_ready)
             self.assertEqual(job.enrichment_method, "html")
             self.assertEqual(job.enrichment_duration_ms, 420)
@@ -330,6 +343,7 @@ class AIRouteTests(unittest.TestCase):
                     location="Remote",
                     url="",
                     description="",
+                    description_quality="summary",
                 )
             )
             session.commit()
@@ -377,6 +391,7 @@ class AIRouteTests(unittest.TestCase):
                     location="Remote",
                     url="https://example.com/jobs/13",
                     description="Short listing",
+                    description_quality="summary",
                 )
             )
             session.commit()
@@ -394,6 +409,7 @@ class AIRouteTests(unittest.TestCase):
                             duration_ms=210,
                             error="HTML extraction was incomplete; falling back to Playwright.",
                             retryable=True,
+                            quality="summary",
                         )
                     }
                 ),
@@ -411,6 +427,7 @@ class AIRouteTests(unittest.TestCase):
             assert job is not None
             self.assertEqual(job.enrichment_status, "partial")
             self.assertFalse(job.scoring_ready)
+            self.assertEqual(job.description_quality, "summary")
             self.assertEqual(job.enrichment_method, "html")
             self.assertEqual(job.enrichment_duration_ms, 210)
             self.assertTrue(job.enrichment_retryable)
@@ -434,7 +451,12 @@ class AIRouteTests(unittest.TestCase):
                     company="Acme",
                     location="Remote",
                     url="https://example.com/jobs/14",
-                    description="Python APIs and SQL systems " * 20,
+                    description=(
+                        "Responsibilities and requirements include Python APIs, SQL systems, skills in stakeholder communication, and experience delivering production services. "
+                        * 6
+                    ),
+                    listing_summary="Backend engineer listing summary",
+                    description_quality="full",
                 )
             )
             session.add(
@@ -445,13 +467,18 @@ class AIRouteTests(unittest.TestCase):
                     company="Acme",
                     location="Remote",
                     url="https://example.com/jobs/15",
-                    description="Business intelligence, SQL, dashboards, experimentation, reporting, and stakeholder communication " * 10,
+                    listing_summary="Data analyst listing summary",
+                    description=(
+                        "Responsibilities include business intelligence, SQL dashboards, reporting requirements, skills in experimentation, and experience with stakeholder communication. "
+                        * 5
+                    ),
+                    description_quality="full",
                 )
             )
             session.commit()
 
         async def fake_score_from_ai(cv_text: str, job_description: str) -> dict[str, object]:
-            if "Business intelligence" in job_description:
+            if "business intelligence" in job_description.lower():
                 raise ai_router.llm_service.RateLimitError("Rate limit hit")
             return {
                 "compatibility_score": 88,
@@ -585,6 +612,8 @@ class AIRouteTests(unittest.TestCase):
                     location="Remote",
                     url="https://example.com/jobs/20",
                     description="Short listing",
+                    listing_summary="Backend engineer listing summary",
+                    description_quality="summary",
                     score=None,
                     score_label=None,
                     scoring_ready=False,
@@ -600,7 +629,10 @@ class AIRouteTests(unittest.TestCase):
         self.assertEqual(exc_info.exception.detail, ai_router.GENERATION_BLOCK_MESSAGE)
 
     def test_generate_documents_allows_scored_jobs_with_complete_descriptions(self) -> None:
-        description = "Python APIs and SQL systems " * 20
+        description = (
+            "Responsibilities and requirements include Python APIs, SQL systems, skills in stakeholder communication, and experience delivering production services. "
+            * 6
+        )
         with Session(self.engine) as session:
             session.add(
                 Job(
@@ -611,6 +643,8 @@ class AIRouteTests(unittest.TestCase):
                     location="Remote",
                     url="https://example.com/jobs/21",
                     description=description,
+                    listing_summary="Backend engineer listing summary",
+                    description_quality="full",
                     score=91,
                     score_label="Excellent",
                     scoring_ready=True,

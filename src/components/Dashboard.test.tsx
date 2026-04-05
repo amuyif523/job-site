@@ -47,7 +47,9 @@ function createJob(overrides: Partial<Job> = {}): Job {
     location: "Remote",
     url: "https://example.com/jobs/1",
     date_scraped: "2026-04-02T00:00:00.000Z",
+    listing_summary: "Card summary for the job listing.",
     description: "Build product experiences with cross-functional collaboration, strong product judgment, TypeScript systems, metrics ownership, and end-to-end delivery across engineering teams.".repeat(2),
+    description_quality: "full",
     intent_status: "included",
     intent_reason: "Included for Frontend Engineer based on title keyword overlap.",
     matched_keywords: ["engineer"],
@@ -123,7 +125,7 @@ describe("Dashboard state branching", () => {
         parsed_json: { summary: "Experienced engineer", skills: ["React", "TypeScript"] },
         suggestions: [],
       },
-      [createJob({ score: 91, scoring_ready: false, enrichment_status: "partial", description: "short" })]
+      [createJob({ score: 91, scoring_ready: false, enrichment_status: "partial", description: "short", description_quality: "summary" })]
     );
 
     expect(screen.getByText("Top matches will appear after trustworthy scoring is ready")).toBeInTheDocument();

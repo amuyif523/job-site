@@ -37,7 +37,9 @@ function createJob(overrides: Partial<Job> = {}): Job {
     location: "Remote",
     url: "https://example.com/jobs/1",
     date_scraped: "2026-04-03T00:00:00.000Z",
+    listing_summary: "Card summary with title, company, and location.",
     description: "This is a complete job description with responsibilities, qualifications, SQL work, dashboards, and stakeholder communication.".repeat(3),
+    description_quality: "full",
     intent_status: "included",
     intent_reason: "Included for Data Analyst based on title keyword overlap.",
     matched_keywords: ["data", "analyst"],
@@ -67,8 +69,9 @@ describe("JobFeed scoring context", () => {
 
     fireEvent.click(screen.getByText("Data Analyst"));
 
+    expect(screen.getAllByText("Full description").length).toBeGreaterThan(0);
     expect(screen.getByText("Why This Score Exists")).toBeInTheDocument();
-    expect(screen.getByText("This score is based on a complete job description and your current CV.")).toBeInTheDocument();
+    expect(screen.getByText("This score is based on a full job description and your current CV.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("score breakdown"));
     expect(screen.getByText("Why JARVIS gave this score")).toBeInTheDocument();
@@ -78,8 +81,10 @@ describe("JobFeed scoring context", () => {
   it("flags limited score context when the job data is incomplete", () => {
     renderJobFeed(
       createJob({
-        description: "Short description",
+        listing_summary: "Short listing card summary.",
+        description: "",
         enrichment_status: "partial",
+        description_quality: "summary",
         scoring_ready: false,
         score: null,
         score_label: "Unscorable",
@@ -89,11 +94,13 @@ describe("JobFeed scoring context", () => {
 
     fireEvent.click(screen.getByText("Data Analyst"));
 
+    expect(screen.getAllByText("Listing summary only").length).toBeGreaterThan(0);
     expect(screen.getByText("Limited Score Context")).toBeInTheDocument();
     expect(screen.getByText("This job could not be scored because the listing data was too incomplete.")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("description"));
-    expect(screen.getByText("The stored description is incomplete, so score quality may be lower than usual.")).toBeInTheDocument();
+    expect(screen.getByText("The stored detail-page description is incomplete, so score quality may be lower than usual.")).toBeInTheDocument();
+    expect(screen.getByText("No detail-page description is stored yet.")).toBeInTheDocument();
     expect(screen.getByText(/run scoring before generating an application/i)).toBeInTheDocument();
   });
 });

@@ -7,7 +7,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { Loader2, Play, Upload } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
-import { canGenerateForJob, getGenerationBlockReason, isReliableTopMatch } from "@/lib/jobScoring";
+import { canGenerateForJob, getDescriptionQualityLabel, getGenerationBlockReason, isReliableTopMatch } from "@/lib/jobScoring";
 import { getIntentBadgeLabel, getIntentMetadata, getIntentToneClasses } from "@/lib/jobIntent";
 
 interface DashboardProps {
@@ -264,6 +264,7 @@ export function Dashboard({ jobs, onGenerateForJob, cvData }: DashboardProps) {
                 <span className={`mt-2 inline-block rounded-full border px-2 py-0.5 font-mono text-[10px] ${getIntentToneClasses(job)}`}>
                   {getIntentBadgeLabel(job)}
                 </span>
+                <p className="mt-2 font-mono text-[10px] text-muted-foreground">Description quality: {getDescriptionQualityLabel(job)}</p>
                 <p className="mt-2 font-mono text-[10px] text-muted-foreground">{getIntentMetadata(job).join(" · ")}</p>
                 <button
                   onClick={() => onGenerateForJob(job)}

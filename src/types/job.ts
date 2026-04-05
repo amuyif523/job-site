@@ -14,7 +14,9 @@ export interface Job {
   location: string;
   url: string;
   date_scraped: string;
+  listing_summary?: string;
   description: string;
+  description_quality?: "summary" | "partial" | "full";
   intent_status: "included" | "borderline" | "excluded";
   intent_reason: string;
   matched_keywords: string[];

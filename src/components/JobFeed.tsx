@@ -7,7 +7,7 @@ import { ScoreRing } from "./ScoreRing";
 import { toast } from "@/hooks/use-toast";
 import { Search, Loader2, ExternalLink, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { canGenerateForJob, getGenerationBlockReason, getScoreContextMessage, hasIncompleteScoreData } from "@/lib/jobScoring";
+import { canGenerateForJob, getDescriptionQualityLabel, getDescriptionQualityToneClasses, getGenerationBlockReason, getScoreContextMessage, hasIncompleteScoreData } from "@/lib/jobScoring";
 import { getIntentBadgeLabel, getIntentMetadata, getIntentSummary, getIntentToneClasses } from "@/lib/jobIntent";
 
 interface JobFeedProps {
@@ -73,6 +73,7 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreBu
   const selectedCanGenerate = selected ? canGenerateForJob(selected) : false;
   const generationBlockReason = selected ? getGenerationBlockReason(selected) : "";
   const selectedIntentMetadata = selected ? getIntentMetadata(selected) : [];
+  const selectedDescriptionQuality = selected ? getDescriptionQualityLabel(selected) : "";
 
   return (
     <div className="animate-fade-up flex gap-0 h-[calc(100vh-64px)]">
@@ -160,6 +161,9 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreBu
                 >
                   {getIntentBadgeLabel(job)}
                 </span>
+                <span className={cn("font-mono text-[10px] px-1.5 py-0.5 rounded-full border", getDescriptionQualityToneClasses(job))}>
+                  {getDescriptionQualityLabel(job)}
+                </span>
               </div>
             </button>
           ))}
@@ -208,6 +212,9 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreBu
                   )}
                   <div className={cn("mt-2 inline-flex w-fit rounded-full border px-2 py-1 font-mono text-[10px] uppercase tracking-wide", getIntentToneClasses(selected))}>
                     {getIntentBadgeLabel(selected)}
+                  </div>
+                  <div className={cn("mt-2 inline-flex w-fit rounded-full border px-2 py-1 font-mono text-[10px] uppercase tracking-wide", getDescriptionQualityToneClasses(selected))}>
+                    {selectedDescriptionQuality}
                   </div>
                   <p className="mt-2 font-mono text-[11px] text-muted-foreground">{selectedIntentMetadata.join(" · ")}</p>
                   <div className={cn("mt-3 rounded-md border px-3 py-2 font-mono text-[11px]", getIntentToneClasses(selected))}>
@@ -306,14 +313,28 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreBu
                   )}
                   {selectedHasIncompleteScoreData && (
                     <div className="rounded-md border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-amber-200">
-                      The stored description is incomplete, so score quality may be lower than usual.
+                      The stored detail-page description is incomplete, so score quality may be lower than usual.
                     </div>
                   )}
-                  {selected.description ? (
-                    <pre className="whitespace-pre-wrap">{selected.description}</pre>
+                  {selected.listing_summary ? (
+                    <div className="rounded-md border border-white/10 bg-black/20 px-3 py-2">
+                      <p className="uppercase tracking-[0.2em] text-[10px] text-muted-foreground">Listing summary</p>
+                      <pre className="mt-1 whitespace-pre-wrap text-foreground">{selected.listing_summary}</pre>
+                    </div>
                   ) : (
-                    <p>No usable job description is stored for this listing yet.</p>
+                    <div className="rounded-md border border-white/10 bg-black/20 px-3 py-2 text-muted-foreground">
+                      <p className="uppercase tracking-[0.2em] text-[10px]">Listing summary</p>
+                      <p className="mt-1">No listing summary was captured from the card.</p>
+                    </div>
                   )}
+                  <div className={cn("rounded-md border px-3 py-2", getDescriptionQualityToneClasses(selected))}>
+                    <p className="uppercase tracking-[0.2em] text-[10px]">Detail-page description</p>
+                    {selected.description ? (
+                      <pre className="mt-1 whitespace-pre-wrap">{selected.description}</pre>
+                    ) : (
+                      <p className="mt-1">No detail-page description is stored yet.</p>
+                    )}
+                  </div>
                 </div>
               )}
               {activeTab === "score breakdown" && (

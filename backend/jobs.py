@@ -114,6 +114,9 @@ def create_job(
         inferred_seniority=intent.inferred_seniority,
         source_confidence=intent.source_confidence,
         enrichment_status=enrichment_status,
+        enrichment_method="manual" if normalized_description else "",
+        enrichment_duration_ms=0,
+        enrichment_retryable=False,
         scoring_ready=scoring_ready,
     )
     session.add(row)

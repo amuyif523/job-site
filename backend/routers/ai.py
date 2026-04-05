@@ -24,7 +24,8 @@ from database import engine, get_session
 from models import CVData, Job, UserPublic
 from services import llm_service
 from services.job_enrichment import (
-    fetch_job_description_map,
+    EnrichmentAttempt,
+    fetch_job_enrichment_map,
     has_high_fidelity_description,
     normalize_job_description,
 )
@@ -209,10 +210,16 @@ def _set_job_enrichment_state(
     status: str,
     error: str = "",
     scoring_ready: bool,
+    method: str = "",
+    duration_ms: int = 0,
+    retryable: bool = False,
 ) -> None:
     row.enrichment_status = status
     row.enrichment_error = error
     row.scoring_ready = scoring_ready
+    row.enrichment_method = method
+    row.enrichment_duration_ms = max(duration_ms, 0)
+    row.enrichment_retryable = retryable
 
 
 def _refresh_job_scoring_readiness(
@@ -220,22 +227,51 @@ def _refresh_job_scoring_readiness(
     *,
     prefer_enriched_label: bool = False,
     error: str = "",
+    method: str = "",
+    duration_ms: int = 0,
+    retryable: bool = False,
 ) -> None:
     description = normalize_job_description(row.description or "")
     row.description = description
+    incomplete_retryable = bool(retryable and error and description)
 
     if has_high_fidelity_description(description):
         status_value = "enriched" if prefer_enriched_label else "ready"
-        _set_job_enrichment_state(row, status=status_value, error="", scoring_ready=True)
+        _set_job_enrichment_state(
+            row,
+            status=status_value,
+            error="",
+            scoring_ready=True,
+            method=method,
+            duration_ms=duration_ms,
+            retryable=False,
+        )
         return
 
     if description:
-        status_value = "failed" if error else "partial"
-        _set_job_enrichment_state(row, status=status_value, error=error, scoring_ready=False)
+        status_value = "failed" if error and not incomplete_retryable else "partial"
+        error_value = "" if incomplete_retryable else error
+        _set_job_enrichment_state(
+            row,
+            status=status_value,
+            error=error_value,
+            scoring_ready=False,
+            method=method,
+            duration_ms=duration_ms,
+            retryable=retryable,
+        )
         return
 
     status_value = "failed" if error else "missing"
-    _set_job_enrichment_state(row, status=status_value, error=error, scoring_ready=False)
+    _set_job_enrichment_state(
+        row,
+        status=status_value,
+        error=error,
+        scoring_ready=False,
+        method=method,
+        duration_ms=duration_ms,
+        retryable=retryable,
+    )
 
 
 def _mark_job_unscorable(row: Job, reason: str) -> None:
@@ -406,17 +442,17 @@ def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dic
             and (row.url or "").strip()
             and row.id is not None
         ]
-        enriched_descriptions: dict[int, str] = {}
+        enrichment_attempts: dict[int, EnrichmentAttempt] = {}
         enrichment_error: str | None = None
         if jobs_needing_description:
             try:
-                enriched_descriptions = asyncio.run(
-                    fetch_job_description_map(
+                enrichment_attempts = asyncio.run(
+                    fetch_job_enrichment_map(
                         [(int(row.id), row.url or "") for row in jobs_needing_description if row.id is not None]
                     )
                 )
             except Exception as exc:
-                enriched_descriptions = {}
+                enrichment_attempts = {}
                 enrichment_error = str(exc)
 
         scored_count = 0
@@ -428,8 +464,9 @@ def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dic
         for row in job_rows:
             job_id = int(row.id or 0)
             enriched_this_job = False
+            enrichment_attempt = enrichment_attempts.get(int(row.id)) if row.id is not None else None
             if row.id is not None and not has_high_fidelity_description(row.description or ""):
-                enriched_description = enriched_descriptions.get(int(row.id), "").strip()
+                enriched_description = (enrichment_attempt.description if enrichment_attempt else "").strip()
                 if enriched_description:
                     row.description = enriched_description
                     _append_job_event(row, "enriched")
@@ -438,7 +475,10 @@ def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dic
             _refresh_job_scoring_readiness(
                 row,
                 prefer_enriched_label=enriched_this_job,
-                error=enrichment_error or "",
+                error=enrichment_error or (enrichment_attempt.error if enrichment_attempt else ""),
+                method=enrichment_attempt.method if enrichment_attempt else row.enrichment_method,
+                duration_ms=enrichment_attempt.duration_ms if enrichment_attempt else row.enrichment_duration_ms,
+                retryable=enrichment_attempt.retryable if enrichment_attempt else row.enrichment_retryable,
             )
 
             job_description = (row.description or "").strip()

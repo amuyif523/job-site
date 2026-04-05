@@ -275,11 +275,19 @@ class AIRouteTests(unittest.TestCase):
             patch.object(ai_router, "engine", self.engine),
             patch.object(
                 ai_router,
-                "fetch_job_description_map",
+                "fetch_job_enrichment_map",
                 new=AsyncMock(
                     return_value={
-                        11: "Detailed role requirements covering SQL, experimentation, stakeholder communication, dashboard delivery, forecasting, data quality ownership, and collaboration with engineering and product teams."  # noqa: E501
-                        * 2
+                        11: ai_router.EnrichmentAttempt(
+                            description=(
+                                "Detailed role requirements covering SQL, experimentation, stakeholder communication, "
+                                "dashboard delivery, forecasting, data quality ownership, and collaboration with engineering and product teams." * 2
+                            ),
+                            method="html",
+                            duration_ms=420,
+                            error="",
+                            retryable=False,
+                        )
                     }
                 ),
             ),
@@ -300,6 +308,8 @@ class AIRouteTests(unittest.TestCase):
             self.assertEqual(job.score, 78)
             self.assertEqual(job.enrichment_status, "enriched")
             self.assertTrue(job.scoring_ready)
+            self.assertEqual(job.enrichment_method, "html")
+            self.assertEqual(job.enrichment_duration_ms, 420)
 
     def test_score_jobs_task_marks_job_unscorable_when_description_is_missing(self) -> None:
         with Session(self.engine) as session:
@@ -326,7 +336,7 @@ class AIRouteTests(unittest.TestCase):
 
         with (
             patch.object(ai_router, "engine", self.engine),
-            patch.object(ai_router, "fetch_job_description_map", new=AsyncMock(return_value={})),
+            patch.object(ai_router, "fetch_job_enrichment_map", new=AsyncMock(return_value={})),
             patch.object(ai_router.llm_service, "get_score_from_ai", new=AsyncMock(side_effect=AssertionError("should not score"))),
         ):
             result = ai_router.score_jobs_task(1, [12])
@@ -373,7 +383,21 @@ class AIRouteTests(unittest.TestCase):
 
         with (
             patch.object(ai_router, "engine", self.engine),
-            patch.object(ai_router, "fetch_job_description_map", new=AsyncMock(return_value={})),
+            patch.object(
+                ai_router,
+                "fetch_job_enrichment_map",
+                new=AsyncMock(
+                    return_value={
+                        13: ai_router.EnrichmentAttempt(
+                            description="Short listing",
+                            method="html",
+                            duration_ms=210,
+                            error="HTML extraction was incomplete; falling back to Playwright.",
+                            retryable=True,
+                        )
+                    }
+                ),
+            ),
             patch.object(ai_router.llm_service, "get_score_from_ai", new=AsyncMock(side_effect=AssertionError("should not score"))),
         ):
             result = ai_router.score_jobs_task(1, [13])
@@ -387,6 +411,9 @@ class AIRouteTests(unittest.TestCase):
             assert job is not None
             self.assertEqual(job.enrichment_status, "partial")
             self.assertFalse(job.scoring_ready)
+            self.assertEqual(job.enrichment_method, "html")
+            self.assertEqual(job.enrichment_duration_ms, 210)
+            self.assertTrue(job.enrichment_retryable)
             self.assertIn("too short to score reliably", (job.score_reasoning or "").lower())
 
     def test_score_jobs_task_returns_partial_failure_summary(self) -> None:

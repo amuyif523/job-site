@@ -235,6 +235,16 @@ export function JobFeed({ jobs, onGenerateForJob, onScoreAll, isScoring, scoreBu
                       <p className="mt-1">{getScoreContextMessage(selected)}</p>
                     </div>
                   )}
+                  {(selected.enrichment_method || selected.enrichment_error) && (
+                    <div className="mt-3 rounded-md border border-white/10 bg-black/20 px-3 py-2 font-mono text-[11px] text-muted-foreground">
+                      <p className="uppercase tracking-[0.2em] text-[10px]">Enrichment diagnostics</p>
+                      <p className="mt-1">
+                        Method: {selected.enrichment_method || "none"} · Duration: {selected.enrichment_duration_ms}ms
+                      </p>
+                      <p className="mt-1">Retryable: {selected.enrichment_retryable ? "yes" : "no"}</p>
+                      {selected.enrichment_error ? <p className="mt-1">Last issue: {selected.enrichment_error}</p> : null}
+                    </div>
+                  )}
                   {/* Action buttons */}
                   <div className="flex gap-2 mt-3">
                     <button

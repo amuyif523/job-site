@@ -23,6 +23,9 @@ export interface Job {
   source_confidence: "low" | "medium" | "high";
   enrichment_status: "pending" | "ready" | "enriched" | "partial" | "missing" | "failed";
   enrichment_error: string;
+  enrichment_method: "" | "manual" | "html" | "playwright";
+  enrichment_duration_ms: number;
+  enrichment_retryable: boolean;
   scoring_ready: boolean;
   score: number | null;
   score_label: string | null;

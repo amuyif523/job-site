@@ -40,6 +40,9 @@ type MockJob = {
   source_confidence: "low" | "medium" | "high";
   enrichment_status: "pending" | "ready" | "enriched" | "partial" | "missing" | "failed";
   enrichment_error: string;
+  enrichment_method: "" | "manual" | "html" | "playwright";
+  enrichment_duration_ms: number;
+  enrichment_retryable: boolean;
   scoring_ready: boolean;
   score: number | null;
   score_label: string | null;
@@ -139,6 +142,9 @@ function newJob(overrides: Partial<MockJob> = {}): MockJob {
     source_confidence: "medium",
     enrichment_status: "ready",
     enrichment_error: "",
+    enrichment_method: "manual",
+    enrichment_duration_ms: 0,
+    enrichment_retryable: false,
     scoring_ready: true,
     score: null,
     score_label: null,
@@ -347,6 +353,9 @@ async function mockAppApi(page: Page, state: MockState) {
                   description: "Build polished React product experiences with TypeScript, design systems, testing, and collaboration across product and engineering.".repeat(2),
                   enrichment_status: "enriched",
                   enrichment_error: "",
+                  enrichment_method: "playwright",
+                  enrichment_duration_ms: 1800,
+                  enrichment_retryable: false,
                   scoring_ready: true,
                   score: 91,
                   score_label: "Excellent",

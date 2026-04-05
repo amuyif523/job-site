@@ -13,6 +13,7 @@ from auth import router as auth_router
 from jobs import router as jobs_router
 from scraper import router as scraper_router
 from routers.ai import router as ai_router
+from routers.admin import router as admin_router
 from routers.chat import router as chat_router
 from routers.cv import router as cv_router
 from dependencies import get_current_user
@@ -51,6 +52,7 @@ app.include_router(jobs_router,    prefix="/api/jobs", tags=["jobs"])
 app.include_router(scraper_router,                     tags=["scraper"])
 app.include_router(ai_router,      prefix="/api",      tags=["ai"])
 app.include_router(cv_router,      prefix="/api/cv",   tags=["cv"])
+app.include_router(admin_router,   prefix="/api/admin", tags=["admin"])
 
 
 @app.get("/auth/me", response_model=UserPublic)

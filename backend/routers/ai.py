@@ -23,6 +23,7 @@ from dependencies import get_current_user
 from database import engine, get_session
 from models import CVData, Job, UserPublic
 from services import llm_service
+from services import operational_visibility
 from services.job_enrichment import (
     EnrichmentAttempt,
     classify_description_quality,
@@ -381,6 +382,13 @@ def _fetch_cv_text(session: Session, user_id: int) -> str:
     return row.extracted_text.strip()
 
 
+def _safe_scoring_provider_name() -> str:
+    try:
+        return llm_service.get_scoring_provider_name()
+    except Exception:
+        return ""
+
+
 def _fetch_jobs(session: Session, user_id: int, job_ids: List[int]) -> List[Job]:
     statement = select(Job).where(Job.user_id == user_id)
     if job_ids:
@@ -461,8 +469,15 @@ def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dic
             except Exception as exc:
                 enrichment_attempts = {}
                 enrichment_error = str(exc)
+            operational_visibility.record_enrichment_batch(
+                expected_jobs=len(jobs_needing_description),
+                attempts=enrichment_attempts,
+                batch_error=enrichment_error or "",
+            )
 
         scored_count = 0
+        enriched_count = 0
+        promoted_top_matches_count = 0
         unscorable_count = 0
         failed_count = 0
         errors: List[str] = []
@@ -479,6 +494,7 @@ def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dic
                     row.description_quality = classify_description_quality(enriched_description)
                     _append_job_event(row, "enriched")
                     enriched_this_job = True
+                    enriched_count += 1
 
             _refresh_job_scoring_readiness(
                 row,
@@ -519,6 +535,11 @@ def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dic
                     )
                 )
             except llm_service.AuthenticationError as exc:
+                operational_visibility.record_provider_issue(
+                    kind="authentication",
+                    error=str(exc),
+                    provider=_safe_scoring_provider_name(),
+                )
                 errors.append(f"job_id={job_id}: {exc}")
                 failed_count += 1
                 report_progress(
@@ -530,6 +551,11 @@ def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dic
                 )
                 continue
             except llm_service.RateLimitError as exc:
+                operational_visibility.record_provider_issue(
+                    kind="rate_limit",
+                    error=str(exc),
+                    provider=_safe_scoring_provider_name(),
+                )
                 errors.append(f"job_id={job_id}: {exc}")
                 failed_count += 1
                 report_progress(
@@ -541,6 +567,11 @@ def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dic
                 )
                 continue
             except llm_service.ProviderError as exc:
+                operational_visibility.record_provider_issue(
+                    kind="provider",
+                    error=str(exc),
+                    provider=_safe_scoring_provider_name(),
+                )
                 errors.append(f"job_id={job_id}: {exc}")
                 failed_count += 1
                 report_progress(
@@ -552,6 +583,11 @@ def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dic
                 )
                 continue
             except Exception:
+                operational_visibility.record_provider_issue(
+                    kind="unexpected",
+                    error="unexpected scoring error",
+                    provider="",
+                )
                 errors.append(f"job_id={job_id}: unexpected scoring error")
                 failed_count += 1
                 report_progress(
@@ -577,6 +613,8 @@ def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dic
             _append_job_event(row, "scored", score=score, score_label=status_value)
             session.add(row)
             scored_count += 1
+            if _job_can_generate(row):
+                promoted_top_matches_count += 1
             report_progress(
                 phase="running",
                 total_jobs=total_jobs,
@@ -594,6 +632,11 @@ def score_jobs_task(self, user_id: int, job_ids: List[int] | None = None) -> dic
             )
 
         session.commit()
+        operational_visibility.record_intent_filter_metrics(
+            enriched=enriched_count,
+            scored=scored_count,
+            promoted_top_matches=promoted_top_matches_count,
+        )
         return {
             "scored": scored_count,
             "results": results,
@@ -617,6 +660,11 @@ def score_all(
     try:
         llm_service.get_scoring_provider_name()
     except llm_service.AuthenticationError as exc:
+        operational_visibility.record_provider_issue(
+            kind="authentication",
+            error=str(exc),
+            provider="",
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=str(exc),

@@ -18,6 +18,7 @@ from kombu.exceptions import OperationalError
 from database import engine
 from dependencies import get_current_user
 from models import Job, UserPublic
+from services import operational_visibility
 from services.job_enrichment import classify_description_quality, normalize_job_description, normalize_listing_summary
 from services.job_intelligence import analyze_job_listing
 from worker import celery_app
@@ -175,6 +176,7 @@ async def scrape_jobteaser(
         base_url += f"&q={quote(target_role)}"
 
     all_jobs = []
+    jobs_found_total = 0
     filtered_out = 0
     filtered_reasons: list[str] = []
     page_num = 1
@@ -211,6 +213,7 @@ async def scrape_jobteaser(
 
             for card in cards:
                 try:
+                    jobs_found_total += 1
                     title_el    = await card.query_selector("h3.JobAdCard_title__l2BSO")
                     company_el  = await card.query_selector("p.JobAdCard_companyName__7vp_H")
                     contract_el = await card.query_selector("div.JobAdCard_contractInfo__8S_AD")
@@ -320,6 +323,17 @@ async def scrape_jobteaser(
 
         session.commit()
     print(f"  ✅ Saved {saved} new jobs for user {user_id}")
+    operational_visibility.record_intent_filter_metrics(
+        jobs_found=jobs_found_total,
+        skipped_irrelevant=filtered_out,
+    )
+    operational_visibility.record_scrape_summary(
+        jobs_found=jobs_found_total,
+        jobs_saved=saved,
+        jobs_filtered_out=filtered_out,
+        target_role=target_role,
+        status="success",
+    )
     progress = _build_progress(
         phase="completed",
         page=max(page_num - 1, 0),
@@ -375,6 +389,14 @@ def run_scraper_task(self, user_id: int, target_role: str = "", max_jobs: int = 
             )
         )
     except Exception as exc:
+        operational_visibility.record_scrape_summary(
+            jobs_found=0,
+            jobs_saved=0,
+            jobs_filtered_out=0,
+            target_role=target_role,
+            status="failure",
+            error=str(exc),
+        )
         raise
 
 @router.post("/api/scrape", response_model=TaskAcceptedResponse, status_code=202)

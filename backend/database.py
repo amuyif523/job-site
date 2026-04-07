@@ -22,19 +22,25 @@ if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is not set; application cannot start")
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+MAX_DB_CONNECT_ATTEMPTS = 20
+DB_CONNECT_RETRY_DELAY_SECONDS = 5
 
-for attempt in range(1, 6):
+for attempt in range(1, MAX_DB_CONNECT_ATTEMPTS + 1):
     try:
         with engine.connect() as conn:
             pass
         print("Successfully connected to the database.")
         break
     except OperationalError as e:
-        if attempt < 5:
-            print(f"Database connection failed. Retrying in 5 seconds... ({attempt}/5)")
-            time.sleep(5)
+        if attempt < MAX_DB_CONNECT_ATTEMPTS:
+            print(
+                "Database connection failed. "
+                f"Retrying in {DB_CONNECT_RETRY_DELAY_SECONDS} seconds... "
+                f"({attempt}/{MAX_DB_CONNECT_ATTEMPTS})"
+            )
+            time.sleep(DB_CONNECT_RETRY_DELAY_SECONDS)
         else:
-            print("Failed to connect to the database after 5 attempts.")
+            print(f"Failed to connect to the database after {MAX_DB_CONNECT_ATTEMPTS} attempts.")
             raise e
 
 

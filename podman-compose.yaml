@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   db:
-    image: postgres:latest
+    image: postgres:16
     container_name: jarvis-db
     restart: unless-stopped
     environment:
@@ -10,9 +10,14 @@ services:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: secure_pass_123
     volumes:
-      - jarvis_db_data:/var/lib/postgresql
+      - jarvis_db_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d jarvis"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     networks:
       - jarvis-internal
 
@@ -22,6 +27,31 @@ services:
     restart: unless-stopped
     ports:
       - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - jarvis-internal
+
+  migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: jarvis-migrate
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://admin:secure_pass_123@db:5432/jarvis
+      REDIS_URL: redis://redis:6379/0
+    command: alembic upgrade heads
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: "no"
     networks:
       - jarvis-internal
 
@@ -38,8 +68,12 @@ services:
       REDIS_URL: redis://redis:6379/0
     command: uvicorn main:app --host 0.0.0.0 --port 8000
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "8000:8000"
     networks:
@@ -58,8 +92,12 @@ services:
       REDIS_URL: redis://redis:6379/0
     command: celery -A worker.celery_app worker --loglevel=info
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - jarvis-internal
 

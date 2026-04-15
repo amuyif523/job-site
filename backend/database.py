@@ -14,6 +14,8 @@ def _get_database_url() -> str:
     if url.startswith("postgres://"):
         # Accept legacy postgres URL format often used by hosting and compose configs.
         url = url.replace("postgres://", "postgresql://", 1)
+    if "@db:" in url and os.getenv("RUNNING_IN_CONTAINER", "").strip().lower() != "true":
+        url = url.replace("@db:", "@localhost:")
     return url
 
 

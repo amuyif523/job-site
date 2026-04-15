@@ -216,7 +216,7 @@ def login(
     )
     user = session.exec(select(User).where(User.email == email)).first()
 
-    if not user or not verify_password(body.password, user.hashed_pw):
+    if not user or not user.hashed_pw or not verify_password(body.password, user.hashed_pw):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     _clear_auth_attempts(_login_hits, rate_limit_key)

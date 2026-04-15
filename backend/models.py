@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from pydantic import EmailStr, field_validator, model_validator
-from sqlalchemy import Column, String
-from sqlmodel import Field, SQLModel
+from sqlalchemy import Column, String, UniqueConstraint
+from sqlmodel import Field, Relationship, SQLModel
 
 MIN_NAME_LENGTH = 2
 MAX_NAME_LENGTH = 80
@@ -22,11 +22,28 @@ class User(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     email: str = Field(sa_column=Column(String, unique=True, index=True, nullable=False))
-    hashed_pw: str
+    hashed_pw: Optional[str] = Field(default=None, nullable=True)
     token_version: int = Field(default=0)
     target_role: str = Field(default="")
     plan: str = Field(default="free")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    identities: list["AuthIdentity"] = Relationship(back_populates="user")
+
+
+class AuthIdentity(SQLModel, table=True):
+    __tablename__ = "auth_identities"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_user_id", name="uq_auth_identities_provider_provider_user_id"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    provider: str = Field(sa_column=Column(String, nullable=False))
+    provider_user_id: str = Field(sa_column=Column(String, nullable=False, index=True))
+    provider_email: str = Field(sa_column=Column(String, nullable=False))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    user: User = Relationship(back_populates="identities")
 
 
 class CVData(SQLModel, table=True):
